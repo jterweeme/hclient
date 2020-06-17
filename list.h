@@ -3,24 +3,36 @@
 
 #include <windows.h>
 
-typedef LIST_ENTRY LIST_NODE_HDR, *PLIST_NODE_HDR;
-typedef LIST_NODE_HDR LIST, *PLIST;
-typedef VOID PLIST_CALLBACK(PLIST_NODE_HDR);
-VOID RemoveNode(LIST_ENTRY *ListNode);
-VOID DestroyListWithCallback(LIST_ENTRY *List, PLIST_CALLBACK Callback);
+typedef VOID PLIST_CALLBACK(PLIST_ENTRY);
 
 class CList
 {
 private:
+    LIST_ENTRY _lijst;
     LIST_ENTRY *_list;
 public:
-    CList(LIST_ENTRY *list);
+    CList();
     void init();
+    PLIST_ENTRY get();
     PLIST_ENTRY next();
     PLIST_ENTRY head();
     PLIST_ENTRY prev();
+    void remove(LIST_ENTRY *node);
+    PLIST_ENTRY removeHead();
     void insertTail(LIST_ENTRY *node);
     BOOL isEmpty() const;
+    void destroyWithCallback(PLIST_CALLBACK cb);
 };
-    
+
+class CListIterator
+{
+private:
+    CList *_list;
+    LIST_ENTRY *_current;
+public:
+    CListIterator(CList *list);
+    BOOL hasNext();
+    PLIST_ENTRY next();
+};
+
 #endif

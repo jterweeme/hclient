@@ -28,28 +28,9 @@ LPCSTR HidDevice::devicePath() const
     return _dev.DevicePath;
 }
 
-/*++
-RoutineDescription:
-   Given a struct _HID_DEVICE, obtain a read report and unpack the values
-   into the InputData array.
---*/
-BOOLEAN HidRead(HID_DEVICE *HidDevice)
+void HidDevice::close()
 {
-    DWORD bytesRead;
-
-    if (!ReadFile(HidDevice->HidDevice, HidDevice->InputReportBuffer,
-                  HidDevice->Caps.InputReportByteLength, &bytesRead, NULL))
-    {
-        return FALSE;
-    }
-
-    if (bytesRead != HidDevice->Caps.InputReportByteLength)
-        return FALSE;
-
-    return UnpackReport(HidDevice->InputReportBuffer,
-                          HidDevice->Caps.InputReportByteLength,
-                           HidP_Input, HidDevice->InputData,
-                           HidDevice->InputDataLength, HidDevice->Ppd);
+    CloseHidDevice(&_dev);
 }
 
 BOOLEAN HidDevice::read()
@@ -67,49 +48,6 @@ BOOLEAN HidDevice::read()
 
     return UnpackReport(_dev.InputReportBuffer, _dev.Caps.InputReportByteLength,
                   HidP_Input, _dev.InputData, _dev.InputDataLength, _dev.Ppd);
-}
-
-/*++
-RoutineDescription:
-   Given a struct _HID_DEVICE, obtain a read report and unpack the values
-   into the InputData array.
---*/
-BOOLEAN ReadOverlapped(HID_DEVICE *HidDevice, HANDLE CompletionEvent,
-    LPOVERLAPPED Overlap)
-{
-    // Setup the overlap structure using the completion event passed in to
-    //  to use for signalling the completion of the Read
-    memset(Overlap, 0, sizeof(OVERLAPPED));
-    Overlap->hEvent = CompletionEvent;
-
-    // Execute the read call saving the return code to determine how to 
-    //  proceed (ie. the read completed synchronously or not).
-    DWORD bytesRead;
-    BOOL readStatus = ReadFile(HidDevice->HidDevice,
-                            HidDevice->InputReportBuffer,
-                            HidDevice->Caps.InputReportByteLength,
-                            &bytesRead, Overlap);
-
-    /*
-    // If the readStatus is FALSE, then one of two cases occurred.
-    //  1) ReadFile call succeeded but the Read is an overlapped one.  Here,
-    //      we should return TRUE to indicate that the Read succeeded.  However,
-    //      the calling thread should be blocked on the completion event
-    //      which means it won't continue until the read actually completes
-    //
-    //  2) The ReadFile call failed for some unknown reason...In this case,
-    //      the return code will be FALSE
-    */
-
-    if (!readStatus)
-        return (ERROR_IO_PENDING == GetLastError());
-
-
-    // If readStatus is TRUE, then the ReadFile call completed synchronously,
-    //   since the calling thread is probably going to wait on the completion
-    //   event, signal the event so it knows it can continue.
-    SetEvent(CompletionEvent);
-    return TRUE;
 }
 
 BOOLEAN HidDevice::readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap)
@@ -144,7 +82,7 @@ Routine Description:
    A return value of TRUE indicates that all data values for the given report
       ID were set without error.
 --*/
-BOOLEAN PackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
+static BOOLEAN PackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
                    HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
                    ULONG DataLength, PHIDP_PREPARSED_DATA Ppd)
 {
@@ -190,7 +128,7 @@ RoutineDescription:
    Given a struct _HID_DEVICE, take the information in the HID_DATA array
    pack it into multiple write reports and send each report to the HID device
 --*/
-BOOLEAN Write(HID_DEVICE *HidDevice)
+BOOLEAN HidWrite(HID_DEVICE *HidDevice)
 {
     // Begin by looping through the HID_DEVICE's HID_DATA structure and setting
     //   the IsDataSet field to FALSE to indicate that each structure has
@@ -211,142 +149,28 @@ BOOLEAN Write(HID_DEVICE *HidDevice)
 
     for (ULONG Index = 0; Index < HidDevice->OutputDataLength; Index++, pData++)
     {
-        if (!pData->IsDataSet)
-        {
-            // Package the report for this data structure.  PackReport will
-            //    set the IsDataSet fields of this structure and any other
-            //    structures that it includes in the report with this structure
-            PackReport(HidDevice->OutputReportBuffer,
-                     HidDevice->Caps.OutputReportByteLength,
-                     HidP_Output, pData,
-                     HidDevice->OutputDataLength - Index,
-                     HidDevice->Ppd);
+        if (pData->IsDataSet)
+            continue;
 
-            // Now a report has been packaged up...Send it down to the device
-            WriteStatus = WriteFile(HidDevice->HidDevice,
-                                  HidDevice->OutputReportBuffer,
-                                  HidDevice->Caps.OutputReportByteLength,
-                                  &bytesWritten,
-                                  NULL) && (bytesWritten == HidDevice -> Caps.OutputReportByteLength);
+        // Package the report for this data structure.  PackReport will
+        //    set the IsDataSet fields of this structure and any other
+        //    structures that it includes in the report with this structure
+        PackReport(HidDevice->OutputReportBuffer,
+                 HidDevice->Caps.OutputReportByteLength,
+                 HidP_Output, pData,
+                 HidDevice->OutputDataLength - Index,
+                 HidDevice->Ppd);
 
-            Status = Status && WriteStatus;
-        }
+        // Now a report has been packaged up...Send it down to the device
+        WriteStatus = WriteFile(HidDevice->HidDevice,
+                              HidDevice->OutputReportBuffer,
+                              HidDevice->Caps.OutputReportByteLength,
+                              &bytesWritten,
+                              NULL) && (bytesWritten == HidDevice->Caps.OutputReportByteLength);
+
+        Status = Status && WriteStatus;
     }
     return Status;
-}
-
-/*++
-RoutineDescription:
-Given a struct _HID_DEVICE, take the information in the HID_DATA array
-pack it into multiple reports and send it to the hid device via HidD_SetFeature()
---*/
-BOOLEAN SetFeature(HID_DEVICE *HidDevice)
-{
-    // Begin by looping through the HID_DEVICE's HID_DATA structure and setting
-    //   the IsDataSet field to FALSE to indicate that each structure has
-    //   not yet been set for this SetFeature() call.
-    HID_DATA *pData = HidDevice->FeatureData;
-
-    for (ULONG Index = 0; Index < HidDevice->FeatureDataLength; Index++, pData++)
-        pData->IsDataSet = FALSE;
-
-    // In setting all the data in the reports, we need to pack a report buffer
-    //   and call WriteFile for each report ID that is represented by the 
-    //   device structure.  To do so, the IsDataSet field will be used to 
-    //   determine if a given report field has already been set.
-    BOOLEAN Status = TRUE;
-    pData = HidDevice->FeatureData;
-
-    for (ULONG Index = 0; Index < HidDevice->FeatureDataLength; Index++, pData++)
-    {
-        if (!pData -> IsDataSet) 
-        {
-            /*
-            // Package the report for this data structure.  PackReport will
-            //    set the IsDataSet fields of this structure and any other 
-            //    structures that it includes in the report with this structure
-            */
-
-            PackReport(HidDevice->FeatureReportBuffer,
-                     HidDevice->Caps.FeatureReportByteLength,
-                     HidP_Feature, pData,
-                     HidDevice->FeatureDataLength - Index, HidDevice->Ppd);
-
-            // Now a report has been packaged up...Send it down to the device
-            BOOLEAN FeatureStatus = HidD_SetFeature(HidDevice->HidDevice,
-                                          HidDevice->FeatureReportBuffer,
-                                          HidDevice->Caps.FeatureReportByteLength);
-
-            Status = FeatureStatus && Status;
-        }
-    }
-    return Status;
-}
-
-/*++
-RoutineDescription:
-   Given a struct _HID_DEVICE, fill in the feature data structures with
-   all features on the device.  May issue multiple HidD_GetFeature() calls to
-   deal with multiple report IDs.
---*/
-BOOLEAN GetFeature(HID_DEVICE *HidDevice)
-{
-    BOOLEAN FeatureStatus;
-
-    // As with writing data, the IsDataSet value in all the structures should be
-    //    set to FALSE to indicate that the value has yet to have been set
-    HID_DATA *pData = HidDevice->FeatureData;
-
-    for (ULONG Index = 0; Index < HidDevice -> FeatureDataLength; Index++, pData++)
-        pData->IsDataSet = FALSE;
-
-    // Next, each structure in the HID_DATA buffer is filled in with a value
-    //   that is retrieved from one or more calls to HidD_GetFeature.  The 
-    //   number of calls is equal to the number of reportIDs on the device
-    BOOLEAN Status = TRUE;
-    pData = HidDevice -> FeatureData;
-
-    for (ULONG Index = 0; Index < HidDevice -> FeatureDataLength; Index++, pData++)
-    {
-        /*
-        // If a value has yet to have been set for this structure, build a report
-        //    buffer with its report ID as the first byte of the buffer and pass
-        //    it in the HidD_GetFeature call.  Specifying the report ID in the
-        //    first specifies which report is actually retrieved from the device.
-        //    The rest of the buffer should be zeroed before the call
-        */
-
-        if (!pData -> IsDataSet) 
-        {
-            memset(HidDevice->FeatureReportBuffer, 0x00, HidDevice->Caps.FeatureReportByteLength);
-
-            HidDevice->FeatureReportBuffer[0] = UCHAR(pData->ReportID);
-
-            FeatureStatus = HidD_GetFeature (HidDevice->HidDevice,
-                                              HidDevice->FeatureReportBuffer,
-                                              HidDevice->Caps.FeatureReportByteLength);
-
-            /*
-            // If the return value is TRUE, scan through the rest of the HID_DATA
-            //    structures and fill whatever values we can from this report
-            */
-
-
-            if (FeatureStatus) 
-            {
-                FeatureStatus = UnpackReport(HidDevice->FeatureReportBuffer,
-                                           HidDevice->Caps.FeatureReportByteLength,
-                                           HidP_Feature,
-                                           HidDevice->FeatureData,
-                                           HidDevice->FeatureDataLength,
-                                           HidDevice->Ppd);
-            }
-
-            Status = Status && FeatureStatus;
-        }
-   }
-
-   return Status;
 }
 
 /*++
@@ -420,143 +244,7 @@ BOOLEAN UnpackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
     return result;
 }
 
-/*++
-Routine Description:
-   Do the required PnP things in order to find all the HID devices in
-   the system at this time.
---*/
-BOOLEAN FindKnownHidDevices(HID_DEVICE **HidDevices, ULONG *NumberDevices)
-{
-    SP_DEVICE_INTERFACE_DATA deviceInfoData;
-    ULONG i;
-    BOOLEAN done = FALSE;
-
-    GUID hidGuid;
-    HidD_GetHidGuid(&hidGuid);
-    *HidDevices = NULL;
-    *NumberDevices = 0;
-
-    // Open a handle to the plug and play dev node.
-    HDEVINFO hardwareDeviceInfo = INVALID_HANDLE_VALUE;
-    hardwareDeviceInfo = SetupDiGetClassDevs(&hidGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-
-    if (INVALID_HANDLE_VALUE == hardwareDeviceInfo)
-        goto Done;
-
-    // Take a wild guess to start
-    *NumberDevices = 4;
-    done = FALSE;
-    deviceInfoData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-    i = 0;
-    while (!done)
-    {
-        *NumberDevices *= 2;
-
-        if (*HidDevices)
-        {
-            void *tmp = realloc(*HidDevices, *NumberDevices * sizeof(HID_DEVICE));
-            HID_DEVICE *newHidDevices = reinterpret_cast<HID_DEVICE *>(tmp);
-
-            if (NULL == newHidDevices)
-                free(*HidDevices);
-
-            *HidDevices = newHidDevices;
-        }
-        else
-        {
-            void *tmp = calloc(*NumberDevices, sizeof(HID_DEVICE));
-            *HidDevices = reinterpret_cast<HID_DEVICE *>(tmp);
-        }
-
-        if (NULL == *HidDevices)
-            goto Done;
-
-        HID_DEVICE *hidDeviceInst = *HidDevices + i;
-
-        for (; i < *NumberDevices; i++, hidDeviceInst++)
-        {
-            // Initialize an empty HID_DEVICE
-            RtlZeroMemory(hidDeviceInst, sizeof(HID_DEVICE));
-            hidDeviceInst->HidDevice = INVALID_HANDLE_VALUE;
-
-            if (SetupDiEnumDeviceInterfaces(hardwareDeviceInfo, 0,
-                                    &hidGuid, i, &deviceInfoData))
-            {
-                ULONG requiredLength = 0;
-
-                SetupDiGetDeviceInterfaceDetail(hardwareDeviceInfo,
-                        &deviceInfoData, NULL, 0, &requiredLength, NULL);
-
-                ULONG predictedLength = requiredLength;
-                SP_DEVICE_INTERFACE_DETAIL_DATA_A *functionClassDeviceData;
-                functionClassDeviceData = PSP_DEVICE_INTERFACE_DETAIL_DATA_A(malloc(predictedLength));
-
-                if (functionClassDeviceData)
-                {
-                    functionClassDeviceData->cbSize = sizeof (SP_DEVICE_INTERFACE_DETAIL_DATA);
-                    ZeroMemory(functionClassDeviceData->DevicePath, sizeof(functionClassDeviceData->DevicePath));
-                }
-                else
-                {
-                    goto Done;
-                }
-
-                // Retrieve the information from Plug and Play.
-                if (SetupDiGetDeviceInterfaceDetailA(hardwareDeviceInfo, &deviceInfoData,
-                           functionClassDeviceData, predictedLength, &requiredLength, NULL))
-                {
-                    // Open device with just generic query abilities to begin with
-                    if (!OpenHidDevice(functionClassDeviceData->DevicePath, FALSE,
-                                       FALSE, FALSE, FALSE, hidDeviceInst))
-                    {
-                        // Save the device path so it can be still listed.
-                        INT iDevicePathSize = INT(strlen(functionClassDeviceData->DevicePath)) + 1;
-
-                        hidDeviceInst->DevicePath = (PCHAR)malloc(iDevicePathSize);
-
-                        if (hidDeviceInst->DevicePath != NULL)
-                        {
-                            StringCbCopyA(hidDeviceInst->DevicePath, iDevicePathSize, functionClassDeviceData->DevicePath);
-                        }
-                    }
-                }
-
-                free(functionClassDeviceData);
-                functionClassDeviceData = NULL;
-            }
-            else
-            {
-                if (ERROR_NO_MORE_ITEMS == GetLastError())
-                {
-                    done = TRUE;
-                    break;
-                }
-            }
-        }
-    }
-
-    *NumberDevices = i;
-Done:
-    if (done == FALSE)
-    {
-        if (*HidDevices != NULL)
-        {
-            free(*HidDevices);
-            *HidDevices = NULL;
-        }
-    }
-
-    if (INVALID_HANDLE_VALUE != hardwareDeviceInfo)
-    {
-        SetupDiDestroyDeviceInfoList (hardwareDeviceInfo);
-        hardwareDeviceInfo = INVALID_HANDLE_VALUE;
-    }
-
-    return done;
-}
-
-static BOOLEAN FillDeviceInfo(HID_DEVICE *HidDevice)
+BOOLEAN HidDevice::_FillDeviceInfo(HID_DEVICE *HidDevice)
 {
     ULONG numValues;
     USHORT numCaps;
@@ -981,7 +669,7 @@ Done:
 
 BOOLEAN HidDevice::open(LPCSTR path, BOOL hasReadAccess, BOOL hasWriteAccess, BOOL isOverlapped, BOOL isExclusive)
 {
-    return OpenHidDevice(path, hasReadAccess, hasWriteAccess, isOverlapped, isExclusive, &_dev);
+    return _OpenHidDevice(path, hasReadAccess, hasWriteAccess, isOverlapped, isExclusive, &_dev);
 }
 
 /*++
@@ -994,26 +682,24 @@ RoutineDescription:
     return if the open and initialization was successfull or not.
 
 --*/
-BOOLEAN OpenHidDevice(LPCSTR DevicePath, BOOL HasReadAccess,
+BOOLEAN HidDevice::_OpenHidDevice(LPCSTR DevicePath, BOOL HasReadAccess,
     BOOL HasWriteAccess, BOOL IsOverlapped, BOOL IsExclusive,
     HID_DEVICE *HidDevice)
 {
-    std::cout << DevicePath << "\r\n";
-    std::cout.flush();
     DWORD accessFlags = 0;
     DWORD sharingFlags = 0;
     BOOLEAN bRet = FALSE;
     INT iDevicePathSize;
     RtlZeroMemory(HidDevice, sizeof(HID_DEVICE));
-    HidDevice -> HidDevice = INVALID_HANDLE_VALUE;
+    HidDevice->HidDevice = INVALID_HANDLE_VALUE;
 
-    if (NULL == DevicePath)
+    if (DevicePath == NULL)
         goto Done;
 
     iDevicePathSize = INT(strlen(DevicePath) + 1);
     HidDevice->DevicePath = PCHAR(malloc(iDevicePathSize));
 
-    if (NULL == HidDevice -> DevicePath)
+    if (HidDevice->DevicePath == NULL)
     {
         goto Done;
     }
@@ -1036,15 +722,18 @@ BOOLEAN OpenHidDevice(LPCSTR DevicePath, BOOL HasReadAccess,
     HidDevice->HidDevice = CreateFileA(DevicePath, accessFlags,
                                sharingFlags, NULL, OPEN_EXISTING, 0, NULL);
 
-    if (INVALID_HANDLE_VALUE == HidDevice->HidDevice)
+    std::cout << HidDevice->HidDevice << " " << DevicePath << "\r\n";
+    std::cout.flush();
+
+    if (HidDevice->HidDevice == INVALID_HANDLE_VALUE)
     {
         goto Done;
     }
 
-    HidDevice -> OpenedForRead = HasReadAccess;
-    HidDevice -> OpenedForWrite = HasWriteAccess;
-    HidDevice -> OpenedOverlapped = IsOverlapped;
-    HidDevice -> OpenedExclusive = IsExclusive;
+    HidDevice->OpenedForRead = HasReadAccess;
+    HidDevice->OpenedForWrite = HasWriteAccess;
+    HidDevice->OpenedOverlapped = IsOverlapped;
+    HidDevice->OpenedExclusive = IsExclusive;
 
     //
     // If the device was not opened as overlapped, then fill in the rest of the
@@ -1082,23 +771,20 @@ BOOLEAN OpenHidDevice(LPCSTR DevicePath, BOOL HasReadAccess,
     //    of the usages in the device.
     //
 
-    if (FALSE == FillDeviceInfo(HidDevice))
-    {
+    if (_FillDeviceInfo(HidDevice) == FALSE)
         goto Done;
-    }
 
     if (IsOverlapped)
     {
         CloseHandle(HidDevice->HidDevice);
         HidDevice->HidDevice = INVALID_HANDLE_VALUE;
 
-        HidDevice->HidDevice = CreateFileA(DevicePath,
-                                       accessFlags,
-                                       sharingFlags,
-                                       NULL,        // no SECURITY_ATTRIBUTES structure
-                                       OPEN_EXISTING, // No special create flags
-                                       FILE_FLAG_OVERLAPPED, // Now we open the device as overlapped
-                                       NULL);       // No template file
+        HidDevice->HidDevice = CreateFileA(DevicePath, accessFlags,
+                                       sharingFlags, NULL, OPEN_EXISTING,
+                                       FILE_FLAG_OVERLAPPED, NULL);
+
+        std::cout << HidDevice->HidDevice << " " << DevicePath << "\r\n";
+        std::cout.flush();
 
         if (INVALID_HANDLE_VALUE == HidDevice->HidDevice)
         {
@@ -1125,10 +811,10 @@ VOID CloseHidDevices(HID_DEVICE *HidDevices, ULONG NumberDevices)
 
 VOID CloseHidDevice(HID_DEVICE *HidDevice)
 {
-    if (NULL != HidDevice->DevicePath)
+    if (HidDevice->DevicePath != NULL)
     {
-        free(HidDevice -> DevicePath);
-        HidDevice -> DevicePath = NULL;
+        free(HidDevice->DevicePath);
+        HidDevice->DevicePath = NULL;
     }
 
     if (INVALID_HANDLE_VALUE != HidDevice -> HidDevice)

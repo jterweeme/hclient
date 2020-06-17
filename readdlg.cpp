@@ -82,7 +82,10 @@ static VOID ReportToString(HID_DATA *pData, LPSTR szBuff, UINT iBuffSize)
     }
 }
 
-static DWORD WINAPI AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
+#define READ_THREAD_TIMEOUT 1000
+#define INFINITE_READS ((ULONG)-1)
+
+DWORD WINAPI ReadDialog::AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
 {
     BOOL readResult;
     DWORD waitStatus;
@@ -92,13 +95,14 @@ static DWORD WINAPI AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
 
     // Create the completion event to send to the the OverlappedRead routine
     HANDLE completionEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+    HidDevice *hidDevice = Context->hidDevice2;
+    HID_DEVICE *tmp = hidDevice->getp();
 
     // If NULL returned, then we cannot proceed any farther so we just exit the
     //  the thread
     if (NULL == completionEvent)
         goto AsyncRead_End;
 
-    //
     // Now we enter the main read loop, which does the following:
     //  1) Calls ReadOverlapped()
     //  2) Waits for read completion with a timeout just to check if
@@ -112,8 +116,6 @@ static DWORD WINAPI AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
     //      it has properly displayed the new data
     //  6) Look to repeat this loop if we are doing more than one read
     //      and the main thread has yet to want us to terminate
-    //
-
     numReadsDone = 0;
 
     do
@@ -121,7 +123,7 @@ static DWORD WINAPI AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
         // Call ReadOverlapped() and if the return status is TRUE, the ReadFile
         //  succeeded so we need to block on completionEvent, otherwise, we just
         //  exit
-        readResult = ReadOverlapped(Context->HidDevice, completionEvent, &overlap);
+        readResult = hidDevice->readOverlapped(completionEvent, &overlap);
 
         if (!readResult)
             break;
@@ -135,7 +137,7 @@ static DWORD WINAPI AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
             //   so let's get the status and leave this loop and process the data
             if (waitStatus == WAIT_OBJECT_0)
             {
-                readResult = GetOverlappedResult(Context->HidDevice->HidDevice, &overlap, &bytesTransferred, TRUE);
+                readResult = GetOverlappedResult(tmp->HidDevice, &overlap, &bytesTransferred, TRUE);
                 break;
             }
         }
@@ -148,21 +150,18 @@ static DWORD WINAPI AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
         {
             numReadsDone++;
 
-            UnpackReport(Context->HidDevice->InputReportBuffer,
-                          Context->HidDevice->Caps.InputReportByteLength,
-                          HidP_Input, Context->HidDevice->InputData,
-                          Context->HidDevice->InputDataLength, Context->HidDevice->Ppd);
+            UnpackReport(tmp->InputReportBuffer, tmp->Caps.InputReportByteLength,
+                     HidP_Input, tmp->InputData, tmp->InputDataLength, tmp->Ppd);
 
             if (Context->DisplayEvent != NULL)
             {
-                PostMessageA(Context->DisplayWindow, WM_DISPLAY_READ_DATA, 0, LPARAM(Context->HidDevice));
+                PostMessageA(Context->DisplayWindow, WM_DISPLAY_READ_DATA, 0, LPARAM(tmp));
                 WaitForSingleObject(Context->DisplayEvent, INFINITE);
             }
             else if (NULL != Context->DisplayWindow)
             {
                 CHAR szTempBuff[1024];
-                HID_DEVICE *pDevice;
-                pDevice = reinterpret_cast<HID_DEVICE *>(Context->HidDevice);
+                HID_DEVICE *pDevice = tmp;
 
                 // Display all the data stored in the Input data field for the device
                 HID_DATA *pData = pDevice->InputData;
@@ -194,45 +193,31 @@ AsyncRead_End:
 INT_PTR CALLBACK
 ReadDialog::_bReadDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    static INT iLbCounter;
-    static CHAR szTempBuff[1024];
-    static READ_THREAD_CONTEXT readContext;
-    static HANDLE readThread;
-    static HID_DEVICE syncDevice;
-    static HID_DEVICE asyncDevice;
-    static BOOL doAsyncReads;
-    static BOOL doSyncReads;
-    HID_DEVICE *pDevice;
-    DWORD threadID;
-    INT iIndex;
-    HID_DATA *pData;
-    UINT uLoop;
-
     switch (message)
     {
     case WM_INITDIALOG:
+    {
         // Initialize the list box counter, the readThread, and the
         //  readContext.DisplayEvent.
-        iLbCounter = 0;
+        _lbCounter = 0;
         readThread = NULL;
         readContext.DisplayEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
 
-        if (NULL == readContext.DisplayEvent)
+        if (readContext.DisplayEvent == NULL)
             EndDialog(hDlg, 0);
 
         // Get the opened device information for the device to perform
         //  reads upon
-        pDevice = reinterpret_cast<HID_DEVICE *>(lParam);
+        HID_DEVICE *pDevice = reinterpret_cast<HID_DEVICE *>(lParam);
 
         // To do sync and async reads requires file handles with different
         //  attributes (ie. an async must be opened with the OVERLAPPED flag
         //  set).  The device node that was passed in the context parameter
         //  was not opened for reading.  Therefore, two more devices will
         //  be opened, one for async reads and one for sync reads.
-        doSyncReads = OpenHidDevice(pDevice->DevicePath, TRUE,
-                                   FALSE, FALSE, FALSE, &syncDevice);
+        _doSyncReads = _syncDevice2.open(pDevice->DevicePath, TRUE, FALSE, FALSE, FALSE);
 
-        if (!doSyncReads)
+        if (!_doSyncReads)
         {
             MessageBoxA(hDlg, "Unable to open device for synchronous reading",
                        HCLIENT_ERROR, MB_ICONEXCLAMATION);
@@ -242,51 +227,56 @@ ReadDialog::_bReadDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
         //    passed in as the lParam.  This is because data related to
         //    Ppd and such cannot be retrieved using the standard HidD_
         //    functions.  However, it is necessary to parse future reports.
-        doAsyncReads = OpenHidDevice(pDevice -> DevicePath,
-                             TRUE, FALSE, TRUE, FALSE, &asyncDevice);
+        _doAsyncReads = _asyncDevice2.open(pDevice->DevicePath, TRUE, FALSE, TRUE, FALSE);
 
-        if (!doAsyncReads)
+        if (!_doAsyncReads)
         {
             MessageBoxA(hDlg, "Unable to open device for asynchronous reading",
-                       HCLIENT_ERROR, MB_ICONEXCLAMATION);
+                        HCLIENT_ERROR, MB_ICONEXCLAMATION);
         }
 
         PostMessageA(hDlg, WM_READ_DONE, 0, 0);
+    }
         break;
     case WM_DISPLAY_READ_DATA:
+    {
         // LParam is the device that was read from
-        pDevice = reinterpret_cast<HID_DEVICE *>(lParam);
+        HidDevice *pDevice2 = reinterpret_cast<HidDevice *>(lParam);
+        //HID_DEVICE *pDevice = reinterpret_cast<HID_DEVICE *>(lParam);
+        HID_DEVICE *pDevice = pDevice2->getp();
 
         // Display all the data stored in the Input data field for the device
-        pData = pDevice->InputData;
+        HID_DATA *pData = pDevice->InputData;
 
         SendDlgItemMessageA(hDlg, IDC_OUTPUT, LB_ADDSTRING, 0,
                            LPARAM("-------------------------------------------"));
 
-        iLbCounter++;
+        _lbCounter++;
 
-        if (iLbCounter > MAX_LB_ITEMS)
+        if (_lbCounter > MAX_LB_ITEMS)
             SendDlgItemMessageA(hDlg, IDC_OUTPUT, LB_DELETESTRING, 0, 0);
 
-        for (uLoop = 0; uLoop < pDevice->InputDataLength; uLoop++)
+        for (UINT uLoop = 0; uLoop < pDevice->InputDataLength; uLoop++)
         {
+            CHAR szTempBuff[1024];
             ReportToString(pData, szTempBuff, sizeof(szTempBuff));
-            iIndex = INT(SendDlgItemMessageA(hDlg, IDC_OUTPUT, LB_ADDSTRING, 0, LPARAM(szTempBuff)));
+            INT iIndex = INT(SendDlgItemMessageA(hDlg, IDC_OUTPUT, LB_ADDSTRING, 0, LPARAM(szTempBuff)));
             SendDlgItemMessage(hDlg, IDC_OUTPUT, LB_SETCURSEL, iIndex, 0);
-            iLbCounter++;
+            _lbCounter++;
 
-            if (iLbCounter > MAX_LB_ITEMS)
+            if (_lbCounter > MAX_LB_ITEMS)
                 SendDlgItemMessageA(hDlg, IDC_OUTPUT, LB_DELETESTRING, 0, 0);
 
             pData++;
         }
         SetEvent(readContext.DisplayEvent);
+    }
         break;
     case WM_READ_DONE:
         EnableWindow(GetDlgItem(hDlg, IDOK), TRUE);
-        EnableWindow(GetDlgItem(hDlg, IDC_READ_SYNCH), doSyncReads);
-        EnableWindow(GetDlgItem(hDlg, IDC_READ_ASYNCH_ONCE), doAsyncReads);
-        EnableWindow(GetDlgItem(hDlg, IDC_READ_ASYNCH_CONT), doAsyncReads);
+        EnableWindow(GetDlgItem(hDlg, IDC_READ_SYNCH), _doSyncReads);
+        EnableWindow(GetDlgItem(hDlg, IDC_READ_ASYNCH_ONCE), _doAsyncReads);
+        EnableWindow(GetDlgItem(hDlg, IDC_READ_ASYNCH_CONT), _doAsyncReads);
 
         SetWindowTextA(GetDlgItem(hDlg, IDC_READ_ASYNCH_ONCE),
                       "One Asynchronous Read");
@@ -304,8 +294,8 @@ ReadDialog::_bReadDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
             EnableWindow(GetDlgItem(hDlg, IDC_READ_SYNCH), FALSE);
             EnableWindow(GetDlgItem(hDlg, IDC_READ_ASYNCH_ONCE), FALSE);
             EnableWindow(GetDlgItem(hDlg, IDC_READ_ASYNCH_CONT), FALSE);
-            HidRead(&syncDevice);
-            PostMessageA(hDlg, WM_DISPLAY_READ_DATA, 0, LPARAM(&syncDevice));
+            _syncDevice2.read();
+            PostMessageA(hDlg, WM_DISPLAY_READ_DATA, 0, LPARAM(&_syncDevice2));
             PostMessageA(hDlg, WM_READ_DONE, 0, 0);
             break;
         case IDC_READ_ASYNCH_ONCE:
@@ -316,10 +306,11 @@ ReadDialog::_bReadDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
             if (readThread == NULL)
             {
                 // Start a new read thread
-                readContext.HidDevice = &asyncDevice;
+                readContext.hidDevice2 = &_asyncDevice2;
                 readContext.TerminateThread = FALSE;
                 readContext.NumberOfReads = (IDC_READ_ASYNCH_ONCE == LOWORD(wParam))?1:INFINITE_READS;
                 readContext.DisplayWindow = hDlg;
+                DWORD threadID;
 
                 readThread = CreateThread(NULL, 0, LPTHREAD_START_ROUTINE(AsynchReadThreadProc),
                                             &readContext, 0, &threadID);
@@ -350,9 +341,9 @@ ReadDialog::_bReadDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
             WaitForSingleObject(readThread, INFINITE);
             //Fall through!!!
         case IDOK:
-            CloseHidDevice(&asyncDevice);
-            CloseHidDevice(&syncDevice);
-            EndDialog(hDlg,0);
+            _asyncDevice2.close();
+            _syncDevice2.close();
+            EndDialog(hDlg, 0);
             break;
         }
         break;

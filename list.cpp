@@ -1,8 +1,8 @@
 #include "list.h"
 
-CList::CList(LIST_ENTRY *list) : _list(list)
+CList::CList()
 {
-
+    _list = &_lijst;
 }
 
 void CList::init()
@@ -25,6 +25,11 @@ PLIST_ENTRY CList::prev()
     return _list->Blink;
 }
 
+PLIST_ENTRY CList::get()
+{
+    return _list;
+}
+
 void CList::insertTail(LIST_ENTRY *node)
 {
     LIST_ENTRY *xList = _list;
@@ -40,39 +45,46 @@ BOOL CList::isEmpty() const
     return _list->Flink == _list;
 }
 
-static BOOL IsListEmpty(LIST_ENTRY *list)
+PLIST_ENTRY CList::removeHead()
 {
-    return list->Flink == list;
-}
-
-static PLIST_ENTRY GetListHead(LIST_ENTRY *list)
-{
-    return list->Flink;
-}
-
-static PLIST_ENTRY RemoveHead(PLIST List)
-{
-    PLIST_NODE_HDR ret = GetListHead(List);
-    RemoveNode(List->Flink);
+    LIST_ENTRY *ret = head();
+    remove(_list->Flink);
     return ret;
 }
 
-VOID DestroyListWithCallback(LIST_ENTRY *list, PLIST_CALLBACK cb)
+void CList::destroyWithCallback(PLIST_CALLBACK *cb)
 {
-    LIST_NODE_HDR *currNode;
+    LIST_ENTRY *currNode;
 
-    while (!IsListEmpty(list))
+    while (!isEmpty())
     {
-        currNode = RemoveHead(list);
+        currNode = removeHead();
         cb(currNode);
     }
 }
 
-VOID RemoveNode(LIST_ENTRY *node)
+void CList::remove(LIST_ENTRY *node)
 {
     LIST_ENTRY *xFlink = node->Flink;
     LIST_ENTRY *xBlink = node->Blink;
     xBlink->Flink = xFlink;
     xFlink->Blink = xBlink;
+}
+
+CListIterator::CListIterator(CList *list) : _list(list)
+{
+    _current = _list->head();
+}
+
+BOOL CListIterator::hasNext()
+{
+    return _current != _list->get();
+}
+
+PLIST_ENTRY CListIterator::next()
+{
+    LIST_ENTRY *ret = _current;
+    _current = _current->Flink;
+    return ret;
 }
 

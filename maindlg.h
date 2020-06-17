@@ -2,10 +2,19 @@
 #define MAINDLG_H
 
 #include "hclient.h"
-#include <windows.h>
+#include "list.h"
 
 class ReadDialog;
 class WriteDialog;
+
+struct DEVICE_LIST_NODE
+{
+    LIST_ENTRY Hdr;
+    HDEVNOTIFY NotificationHandle;
+    HID_DEVICE HidDeviceInfo;
+    HidDevice hidDevice;
+    BOOL DeviceOpened;
+};
 
 class MainDialog
 {
@@ -13,7 +22,9 @@ private:
     static MainDialog *_instance;
     HINSTANCE _hInstance;
     static INT_PTR CALLBACK bMainDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+    static VOID DestroyDeviceListCallback(LIST_ENTRY *ListNode);
     INT_PTR dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+    void addString(HWND hctrl, LPCSTR str, ULONG value);
     void _displayDeviceAttributes(HIDD_ATTRIBUTES *pAttrib, HWND hControl);
     void _loadItemTypes(HWND hItemTypes);
     void _displayOutputButtons(HidDevice *pDevice, HWND hControl);
@@ -35,9 +46,11 @@ private:
         rWriteDataStruct rWriteData[], int iMaxElements);
 
     HidDevice *_getCurrentDevice(HWND hDlg);
+    BOOLEAN _FindKnownHidDevices(HID_DEVICE **HidDevices, ULONG *nDevices);
     BOOLEAN init(HWND hDlg);
     ReadDialog *_readDlg;
     WriteDialog *_writeDlg;
+    CList g_physDevList;
 public:
     MainDialog(HINSTANCE hInstance);
     virtual ~MainDialog();

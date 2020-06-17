@@ -94,21 +94,11 @@ struct HID_DEVICE
     HIDP_VALUE_CAPS *FeatureValueCaps;
 };
 
-BOOLEAN HidRead(HID_DEVICE *HidDevice);
-BOOLEAN ReadOverlapped(HID_DEVICE *HidDevice, HANDLE CompletionEvent, LPOVERLAPPED Overlap);
-BOOLEAN Write(HID_DEVICE *HidDevice);
+BOOLEAN HidWrite(HID_DEVICE *HidDevice);
 
 BOOLEAN UnpackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
    HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
    ULONG DataLength, PHIDP_PREPARSED_DATA Ppd);
-
-BOOLEAN SetFeature(HID_DEVICE *HidDevice);
-BOOLEAN GetFeature(HID_DEVICE *HidDevice);
-BOOLEAN FindKnownHidDevices(HID_DEVICE **HidDevices, ULONG *nDevices);
-
-BOOLEAN
-OpenHidDevice(LPCSTR DevicePath, BOOL HasReadAccess, BOOL HasWriteAccess,
-              BOOL IsOverlapped, BOOL IsExclusive, HID_DEVICE *HidDevice);
 
 VOID CloseHidDevices(HID_DEVICE *HidDevices, ULONG NumberDevices);
 VOID CloseHidDevice(HID_DEVICE *HidDevice);
@@ -117,6 +107,11 @@ class HidDevice
 {
 private:
     HID_DEVICE _dev;
+    BOOLEAN _FillDeviceInfo(HID_DEVICE *HidDevice);
+
+    BOOLEAN _OpenHidDevice(LPCSTR DevicePath, BOOL HasReadAccess,
+                BOOL HasWriteAccess, BOOL IsOverlapped, BOOL IsExclusive,
+                HID_DEVICE *HidDevice);
 public:
     HidDevice();
     void set(HID_DEVICE dev);
@@ -125,6 +120,8 @@ public:
     LPCSTR devicePath() const;
     BOOLEAN read();
     BOOLEAN readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap);
+    void close();
+
 
     BOOLEAN open(LPCSTR path, BOOL hasReadAccess, BOOL hasWriteAccess,
                  BOOL isOverlapped, BOOL isExclusive);

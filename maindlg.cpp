@@ -3,14 +3,11 @@
 #include "resource.h"
 #include "readdlg.h"
 #include "writedlg.h"
+#include "list.h"
 #include <strsafe.h>
 #include <dbt.h>
 
 typedef DEVICE_LIST_NODE *PDEVICE_LIST_NODE;
-
-LIST_ENTRY PhysicalDeviceList;
-CList g_physDevList(&PhysicalDeviceList);
-extern HINSTANCE hGInstance;
 
 MainDialog::MainDialog(HINSTANCE hInstance) : _hInstance(hInstance)
 {
@@ -67,8 +64,6 @@ BOOL MainDialog::_bGetData(rWriteDataStruct *pItems, INT iCount, HWND hParent)
     memcpy( &(arTempItems[0]), pItems, sizeof(rWriteDataStruct)*iCount);
     rParams.iCount = iCount;
     rParams.prItems = &(arTempItems[0]);
-
-    //INT iResult = INT(DialogBoxParamA(hGInstance, "WRITEDATA", hParent, bGetDataDlgProc, LPARAM(&rParams)));
     INT iResult = _writeDlg->create(hParent, &rParams);
 
     if (iResult)
@@ -91,7 +86,7 @@ BOOL MainDialog::_registerHidDevice(HWND WindowHandle, DEVICE_LIST_NODE *DeviceN
     return DeviceNode->NotificationHandle != NULL;
 }
 
-static VOID DestroyDeviceListCallback(LIST_ENTRY *ListNode)
+VOID MainDialog::DestroyDeviceListCallback(LIST_ENTRY *ListNode)
 {
     PDEVICE_LIST_NODE deviceNode = PDEVICE_LIST_NODE(ListNode);
 
@@ -107,27 +102,27 @@ static VOID DestroyDeviceListCallback(LIST_ENTRY *ListNode)
     free(deviceNode);
 }
 
+void MainDialog::addString(HWND hctrl, LPCSTR str, ULONG value)
+{
+    CHAR szTempBuff[SMALL_BUFF];
+    StringCbPrintfA(szTempBuff, SMALL_BUFF, str, value);
+    SendMessageA(hctrl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
+}
+
 void MainDialog::_displayDeviceCaps(HIDP_CAPS *pCaps, HWND hControl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
     SendMessageA(hControl, LB_RESETCONTENT, 0, 0);
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Usage Page: 0x%x", pCaps->UsagePage);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Usage: 0x%x", pCaps->Usage);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Input report byte length: %d", pCaps->InputReportByteLength);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Output report byte length: %d", pCaps->OutputReportByteLength);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Feature report byte length: %d", pCaps->FeatureReportByteLength);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Number of collection nodes %d: ", pCaps->NumberLinkCollectionNodes);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
+    addString(hControl, "Usage Page: 0x%x", pCaps->UsagePage);
+    addString(hControl, "Usage: 0x%x", pCaps->Usage);
+    addString(hControl, "Input report byte length: %d", pCaps->InputReportByteLength);
+    addString(hControl, "Output report byte length: %d", pCaps->OutputReportByteLength);
+    addString(hControl, "Feature report byte length: %d", pCaps->FeatureReportByteLength);
+    addString(hControl, "Number of collection nodes %d: ", pCaps->NumberLinkCollectionNodes);
 }
 
 void MainDialog::_displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, HWND hControl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
+    CHAR szTempBuff[SMALL_BUFF];
     StringCbPrintfA(szTempBuff, SMALL_BUFF, "Report ID: 0x%x", pButton->ReportID);
     SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
     StringCbPrintfA(szTempBuff, SMALL_BUFF, "Usage Page: 0x%x", pButton->UsagePage);
@@ -184,7 +179,6 @@ void MainDialog::_displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, HWND hContr
                        "Designator Min: 0x%x, Designator Max: 0x%x",
                        pButton->Range.DesignatorMin,
                        pButton->Range.DesignatorMax);
-
     }
     else
     {
@@ -201,55 +195,44 @@ void MainDialog::_displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, HWND hContr
 
 void MainDialog::_loadDevices(HWND hDeviceCombo)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
-    INT i = 0;
+    CHAR szTempBuff[SMALL_BUFF];
     INT iIndex;
-
-    // Reset the content of the device list box.
     SendMessage(hDeviceCombo, CB_RESETCONTENT, 0, 0);
+    CListIterator it(&g_physDevList);
 
-    if (g_physDevList.isEmpty() == 0)
+    for (INT i = 0; it.hasNext(); i++)
     {
-        DEVICE_LIST_NODE *currNode = PDEVICE_LIST_NODE(g_physDevList.head());
+        DEVICE_LIST_NODE *currNode = PDEVICE_LIST_NODE(it.next());
 
-        do
+        if (currNode->HidDeviceInfo.HidDevice != INVALID_HANDLE_VALUE)
         {
-            if (currNode->HidDeviceInfo.HidDevice != INVALID_HANDLE_VALUE)
-            {
-                StringCbPrintfA(szTempBuff, SMALL_BUFF,
-                               "Device #%d: VID: 0x%04X  PID: 0x%04X  UsagePage: 0x%X  Usage: 0x%X",
-                                i++,
-                                currNode->HidDeviceInfo.Attributes.VendorID,
-                                currNode->HidDeviceInfo.Attributes.ProductID,
-                                currNode->HidDeviceInfo.Caps.UsagePage,
-                                currNode->HidDeviceInfo.Caps.Usage);
-            }
-            else
-            {
-                StringCbPrintfA(szTempBuff, SMALL_BUFF, "*Device #%d: %s", i++,
-                                (NULL != currNode->HidDeviceInfo.DevicePath) ? (currNode->HidDeviceInfo.DevicePath) : "");
-            }
-
-            iIndex = INT(SendMessageA(hDeviceCombo, CB_ADDSTRING, 0, LPARAM(szTempBuff)));
-
-            if (CB_ERR != iIndex && INVALID_HANDLE_VALUE != currNode->HidDeviceInfo.HidDevice)
-            {
-                SendMessageA(hDeviceCombo, CB_SETITEMDATA, iIndex, (LPARAM)(&currNode->HidDeviceInfo));
-            }
-
-            currNode = PDEVICE_LIST_NODE(PLIST_ENTRY(currNode)->Flink); //nextEntry
-
+            StringCbPrintfA(szTempBuff, SMALL_BUFF,
+                    "Device #%d: VID: 0x%04X  PID: 0x%04X  UsagePage: 0x%X  Usage: 0x%X", i,
+                    currNode->HidDeviceInfo.Attributes.VendorID,
+                    currNode->HidDeviceInfo.Attributes.ProductID,
+                    currNode->HidDeviceInfo.Caps.UsagePage,
+                    currNode->HidDeviceInfo.Caps.Usage);
         }
-        while (reinterpret_cast<LIST_ENTRY *>(currNode) != &PhysicalDeviceList);
+        else
+        {
+            StringCbPrintfA(szTempBuff, SMALL_BUFF, "*Device #%d: %s", i,
+                            (NULL != currNode->HidDeviceInfo.DevicePath) ? (currNode->HidDeviceInfo.DevicePath) : "");
+        }
+
+        iIndex = INT(SendMessageA(hDeviceCombo, CB_ADDSTRING, 0, LPARAM(szTempBuff)));
+
+        if (CB_ERR != iIndex && INVALID_HANDLE_VALUE != currNode->HidDeviceInfo.HidDevice)
+        {
+            SendMessageA(hDeviceCombo, CB_SETITEMDATA, iIndex, (LPARAM)(&currNode->HidDeviceInfo));
+        }
     }
 
     SendMessage(hDeviceCombo, CB_SETCURSEL, 0, 0);
-    return;
 }
 
 void MainDialog::_displayFeatureValues(HidDevice *pDevice, HWND hControl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
+    CHAR szTempBuff[SMALL_BUFF];
     SendMessage(hControl, LB_RESETCONTENT, 0, 0);
     HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->FeatureValueCaps;
 
@@ -269,7 +252,7 @@ void MainDialog::_displayFeatureValues(HidDevice *pDevice, HWND hControl)
 
 void MainDialog::_displayOutputValues(HidDevice *pDevice, HWND hControl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
+    CHAR szTempBuff[SMALL_BUFF];
     SendMessage(hControl, LB_RESETCONTENT, 0, 0);
     HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->OutputValueCaps;
 
@@ -289,7 +272,7 @@ void MainDialog::_displayOutputValues(HidDevice *pDevice, HWND hControl)
 
 void MainDialog::_displayValueAttributes(HIDP_VALUE_CAPS *pValue, HWND hControl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
+    CHAR szTempBuff[SMALL_BUFF];
     StringCbPrintfA(szTempBuff, SMALL_BUFF, "Report ID 0x%x", pValue->ReportID);
     SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
     StringCbPrintfA(szTempBuff, SMALL_BUFF, "Usage Page: 0x%x", pValue->UsagePage);
@@ -353,7 +336,8 @@ void MainDialog::_displayValueAttributes(HIDP_VALUE_CAPS *pValue, HWND hControl)
     }
     else
     {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "String Index: 0x%x",pValue->NotRange.StringIndex);
+        StringCbPrintfA(szTempBuff, SMALL_BUFF, "String Index: 0x%x",
+                        pValue->NotRange.StringIndex);
     }
     SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
 
@@ -364,7 +348,8 @@ void MainDialog::_displayValueAttributes(HIDP_VALUE_CAPS *pValue, HWND hControl)
     }
     else
     {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Designator Index: 0x%x", pValue->NotRange.DesignatorIndex);
+        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Designator Index: 0x%x",
+                        pValue->NotRange.DesignatorIndex);
     }
 
     SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
@@ -377,11 +362,12 @@ void MainDialog::_displayValueAttributes(HIDP_VALUE_CAPS *pValue, HWND hControl)
 
 void MainDialog::_displayInputButtons(HidDevice *pDevice, HWND hControl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
+    CHAR szTempBuff[SMALL_BUFF];
     SendMessageA(hControl, LB_RESETCONTENT, 0, LPARAM(0));
     HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->InputButtonCaps;
+    const USHORT nCaps = pDevice->getp()->Caps.NumberInputButtonCaps;
 
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberInputButtonCaps; iLoop++)
+    for (INT iLoop = 0; iLoop < nCaps; iLoop++)
     {
         StringCbPrintfA(szTempBuff, SMALL_BUFF, "Input button cap # %d", iLoop);
         INT iIndex = INT(SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff)));
@@ -397,11 +383,12 @@ void MainDialog::_displayInputButtons(HidDevice *pDevice, HWND hControl)
 
 void MainDialog::_displayFeatureButtons(HidDevice *pDevice, HWND hControl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
+    CHAR szTempBuff[SMALL_BUFF];
     SendMessage(hControl, LB_RESETCONTENT, 0, 0);
     HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->FeatureButtonCaps;
 
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberFeatureButtonCaps; iLoop++)
+    USHORT nCaps = pDevice->getp()->Caps.NumberFeatureButtonCaps;
+    for (USHORT iLoop = 0; iLoop < nCaps; iLoop++)
     {
         StringCbPrintfA(szTempBuff, SMALL_BUFF, "Feature button cap # %d", iLoop);
         INT iIndex = INT(SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff)));
@@ -416,7 +403,7 @@ void MainDialog::_displayFeatureButtons(HidDevice *pDevice, HWND hControl)
 
 void MainDialog::_displayInputValues(HidDevice *pDevice, HWND hCtrl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
+    CHAR szTempBuff[SMALL_BUFF];
     SendMessage(hCtrl, LB_RESETCONTENT, 0, 0);
     HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->InputValueCaps;
 
@@ -436,7 +423,7 @@ void MainDialog::_displayInputValues(HidDevice *pDevice, HWND hCtrl)
 
 void MainDialog::_displayOutputButtons(HidDevice *pDevice, HWND hControl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
+    CHAR szTempBuff[SMALL_BUFF];
     SendMessage(hControl, LB_RESETCONTENT, 0, LPARAM(0));
     HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->OutputButtonCaps;
 
@@ -499,15 +486,11 @@ void MainDialog::_loadItemTypes(HWND hItemTypes)
     SendMessage(hItemTypes, CB_SETCURSEL, 0, 0);
 }
 
-void MainDialog::_displayDeviceAttributes(HIDD_ATTRIBUTES *pAttrib, HWND hControl)
+void MainDialog::_displayDeviceAttributes(HIDD_ATTRIBUTES *pAttrib, HWND hCtrl)
 {
-    static CHAR szTempBuff[SMALL_BUFF];
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Vendor ID: 0x%x", pAttrib->VendorID);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Product ID: 0x%x", pAttrib->ProductID);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-    StringCbPrintfA(szTempBuff, SMALL_BUFF, "Version Number  0x%x", pAttrib->VersionNumber);
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
+    addString(hCtrl, "Vendor ID: 0x%x", pAttrib->VendorID);
+    addString(hCtrl, "Product ID: 0x%x", pAttrib->ProductID);
+    addString(hCtrl, "Version Number  0x%x", pAttrib->VersionNumber);
 }
 
 BOOL MainDialog::_setButtonUsages(HID_DATA *pCap, LPSTR pszInputString)
@@ -536,12 +519,13 @@ BOOL MainDialog::_setButtonUsages(HID_DATA *pCap, LPSTR pszInputString)
     return bNoError;
 }
 
-BOOL MainDialog::_parseData(HID_DATA *pData, rWriteDataStruct rWriteData[], int iCount, int *piErrorLine)
+BOOL MainDialog::_parseData(HID_DATA *pData, rWriteDataStruct rWriteData[],
+                            int iCount, int *piErrorLine)
 {
     BOOL noError = TRUE;
     HID_DATA *pWalk = pData;
 
-    for (INT iCap = 0; (iCap < iCount) && noError; iCap++)
+    for (INT iCap = 0; iCap < iCount && noError; iCap++)
     {
         // Check to see if our data is a value cap or not
         if (!pWalk->IsButtonData)
@@ -584,6 +568,8 @@ INT MainDialog::_prepareDataFields(HID_DATA *pData, ULONG ulDataLength,
     }
     return i;
 }
+
+#define WM_UNREGISTER_HANDLE    WM_USER+1
 
 INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -637,7 +623,7 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 
                 if (_parseData(writeDevice.OutputData, rWriteData, iCount, &iErrorLine))
                 {
-                    Write(&writeDevice);
+                    HidWrite(&writeDevice);
                 }
                 else
                 {
@@ -753,7 +739,8 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 
                     if (iIndex != -1)
                     {
-                        pButtonCaps = PHIDP_BUTTON_CAPS(SendDlgItemMessageA(hDlg, IDC_ITEMS, LB_GETITEMDATA, iIndex, 0));
+                        LRESULT ret = SendDlgItemMessageA(hDlg, IDC_ITEMS, LB_GETITEMDATA, iIndex, 0);
+                        pButtonCaps = PHIDP_BUTTON_CAPS(ret);
                     }
 
                     SendDlgItemMessageA(hDlg, IDC_ATTRIBUTES, LB_RESETCONTENT, 0, 0);
@@ -815,8 +802,7 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                 break;
             case IDOK:
             case IDCANCEL:
-                // Destroy the physical device list for exit
-                DestroyListWithCallback(&PhysicalDeviceList, DestroyDeviceListCallback);
+                g_physDevList.destroyWithCallback(DestroyDeviceListCallback);
                 EndDialog(hDlg, 0);
                 break;
             }
@@ -836,20 +822,20 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                     pbroadcastInterface = PDEV_BROADCAST_DEVICEINTERFACE_A(lParam);
                     currNode = reinterpret_cast<DEVICE_LIST_NODE *>(g_physDevList.head());
 
-                    while (currNode != (PDEVICE_LIST_NODE)&PhysicalDeviceList)
+                    while (currNode != PDEVICE_LIST_NODE(g_physDevList.get()))
                     {
                         // save the next node pointer first as we may remove
                         //  the current node.
                         nextNode = PDEVICE_LIST_NODE(PLIST_ENTRY(currNode)->Flink);
 
-                        if ((currNode->HidDeviceInfo.DevicePath != NULL) &&
-                            (0 == strcmp(currNode->HidDeviceInfo.DevicePath,
-                                        pbroadcastInterface->dbcc_name)))
+                        if (currNode->HidDeviceInfo.DevicePath != NULL &&
+                            strcmp(currNode->HidDeviceInfo.DevicePath,
+                                   pbroadcastInterface->dbcc_name) == 0)
                         {
                             if (currNode->DeviceOpened == FALSE)
                             {
                                 // Remove the node from the list
-                                RemoveNode(PLIST_NODE_HDR(currNode));
+                                g_physDevList.remove(PLIST_ENTRY(currNode));
 
                                 // Let it free the memory of the device path string
                                 CloseHidDevice(&currNode->HidDeviceInfo);
@@ -883,10 +869,10 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                     else
                     {
                         BOOLEAN res;
+                        res = listNode->hidDevice.open(pbroadcastInterface->dbcc_name,
+                                                       FALSE, FALSE, FALSE, FALSE);
 
-                        res = OpenHidDevice(pbroadcastInterface->dbcc_name,
-                                            FALSE, FALSE, FALSE, FALSE,
-                                            &listNode->HidDeviceInfo);
+                        listNode->HidDeviceInfo = listNode->hidDevice.get();
 
                         if (!res)
                         {
@@ -939,34 +925,34 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
             {
                 DEV_BROADCAST_HDR *broadcastHdr = PDEV_BROADCAST_HDR(lParam);
 
-                if (DBT_DEVTYP_HANDLE == broadcastHdr->dbch_devicetype)
+                if (broadcastHdr->dbch_devicetype != DBT_DEVTYP_HANDLE)
+                    return TRUE;
+
+                PDEV_BROADCAST_HANDLE broadcastHandle = PDEV_BROADCAST_HANDLE(lParam);
+
+                // Get the handle to the notification registration
+                HDEVNOTIFY notificationHandle = broadcastHandle->dbch_hdevnotify;
+
+                // Search the physical device list for the handle that
+                //  was removed...
+                PDEVICE_LIST_NODE currNode;
+                currNode = PDEVICE_LIST_NODE(g_physDevList.head());
+
+                // Find out the device to close its handle
+                while (currNode != PDEVICE_LIST_NODE(g_physDevList.get()))
                 {
-                    PDEV_BROADCAST_HANDLE broadcastHandle = PDEV_BROADCAST_HANDLE(lParam);
-
-                    // Get the handle to the notification registration
-                    HDEVNOTIFY notificationHandle = broadcastHandle->dbch_hdevnotify;
-
-                    // Search the physical device list for the handle that
-                    //  was removed...
-                    PDEVICE_LIST_NODE currNode;
-                    currNode = PDEVICE_LIST_NODE(g_physDevList.head());
-
-                    // Find out the device to close its handle
-                    while (currNode != PDEVICE_LIST_NODE(&PhysicalDeviceList))
+                    if (currNode->NotificationHandle == notificationHandle)
                     {
-                        if (currNode->NotificationHandle == notificationHandle)
+                        if (currNode->DeviceOpened)
                         {
-                            if (currNode->DeviceOpened)
-                            {
-                                CloseHidDevice(&(currNode -> HidDeviceInfo));
-                                currNode->DeviceOpened = FALSE;
-                            }
-
-                            break;
+                            CloseHidDevice(&(currNode -> HidDeviceInfo));
+                            currNode->DeviceOpened = FALSE;
                         }
 
-                        currNode = PDEVICE_LIST_NODE(PLIST_ENTRY(currNode)->Flink);
+                        break;
                     }
+
+                    currNode = PDEVICE_LIST_NODE(PLIST_ENTRY(currNode)->Flink);
                 }
             }
                 return TRUE;
@@ -989,7 +975,7 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                 DEVICE_LIST_NODE *currNode;
                 currNode = reinterpret_cast<DEVICE_LIST_NODE *>(g_physDevList.head());
 
-                while (currNode != reinterpret_cast<DEVICE_LIST_NODE *>(&PhysicalDeviceList))
+                while (currNode != PDEVICE_LIST_NODE(g_physDevList.get()))
                 {
                     if (currNode->NotificationHandle == notificationHandle)
                     {
@@ -998,7 +984,7 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
                         if (currNode->DeviceOpened)
                             CloseHidDevice(&currNode->HidDeviceInfo);
 
-                        RemoveNode(reinterpret_cast<LIST_ENTRY *>(currNode));
+                        g_physDevList.remove(PLIST_ENTRY(currNode));
                         free(currNode);
                         _loadDevices(GetDlgItem(hDlg, IDC_DEVICES));
 
@@ -1032,7 +1018,7 @@ BOOLEAN MainDialog::init(HWND hDlg)
     g_physDevList.init();
     HID_DEVICE *tempDeviceList = nullptr;
 
-    if (!FindKnownHidDevices(&tempDeviceList, &numberDevices))
+    if (!_FindKnownHidDevices(&tempDeviceList, &numberDevices))
     {
         EndDialog(hDlg, 0);
         return FALSE;
@@ -1046,7 +1032,7 @@ BOOLEAN MainDialog::init(HWND hDlg)
 
         if (listNode == nullptr)
         {
-            DestroyListWithCallback(&PhysicalDeviceList, DestroyDeviceListCallback);
+            g_physDevList.destroyWithCallback(DestroyDeviceListCallback);
             CloseHidDevices(pDevice, numberDevices - iIndex);
             free(tempDeviceList);
             EndDialog(hDlg, 0);
@@ -1104,5 +1090,144 @@ BOOLEAN MainDialog::init(HWND hDlg)
                 LPARAM(GetDlgItem(hDlg, IDC_DEVICES)));
 
     return FALSE;
+}
+
+/*++
+Routine Description:
+   Do the required PnP things in order to find all the HID devices in
+   the system at this time.
+--*/
+BOOLEAN MainDialog::_FindKnownHidDevices(HID_DEVICE **HidDevices, ULONG *NumberDevices)
+{
+    SP_DEVICE_INTERFACE_DATA deviceInfoData;
+    ULONG i;
+    BOOLEAN done = FALSE;
+
+    GUID hidGuid;
+    HidD_GetHidGuid(&hidGuid);
+    *HidDevices = NULL;
+    *NumberDevices = 0;
+
+    // Open a handle to the plug and play dev node.
+    HDEVINFO hardwareDeviceInfo = INVALID_HANDLE_VALUE;
+    hardwareDeviceInfo = SetupDiGetClassDevs(&hidGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+
+    if (INVALID_HANDLE_VALUE == hardwareDeviceInfo)
+        goto Done;
+
+    // Take a wild guess to start
+    *NumberDevices = 4;
+    done = FALSE;
+    deviceInfoData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+    i = 0;
+    while (!done)
+    {
+        *NumberDevices *= 2;
+
+        if (*HidDevices)
+        {
+            void *tmp = realloc(*HidDevices, *NumberDevices * sizeof(HID_DEVICE));
+            HID_DEVICE *newHidDevices = reinterpret_cast<HID_DEVICE *>(tmp);
+
+            if (NULL == newHidDevices)
+                free(*HidDevices);
+
+            *HidDevices = newHidDevices;
+        }
+        else
+        {
+            void *tmp = calloc(*NumberDevices, sizeof(HID_DEVICE));
+            *HidDevices = reinterpret_cast<HID_DEVICE *>(tmp);
+        }
+
+        if (NULL == *HidDevices)
+            goto Done;
+
+        HID_DEVICE *hidDeviceInst = *HidDevices + i;
+
+        for (; i < *NumberDevices; i++, hidDeviceInst++)
+        {
+            // Initialize an empty HID_DEVICE
+            RtlZeroMemory(hidDeviceInst, sizeof(HID_DEVICE));
+            hidDeviceInst->HidDevice = INVALID_HANDLE_VALUE;
+
+            if (SetupDiEnumDeviceInterfaces(hardwareDeviceInfo, 0,
+                                    &hidGuid, i, &deviceInfoData))
+            {
+                ULONG requiredLength = 0;
+
+                SetupDiGetDeviceInterfaceDetail(hardwareDeviceInfo,
+                        &deviceInfoData, NULL, 0, &requiredLength, NULL);
+
+                ULONG predictedLength = requiredLength;
+                SP_DEVICE_INTERFACE_DETAIL_DATA_A *functionClassDeviceData;
+                functionClassDeviceData = PSP_DEVICE_INTERFACE_DETAIL_DATA_A(malloc(predictedLength));
+
+                if (functionClassDeviceData)
+                {
+                    functionClassDeviceData->cbSize = sizeof (SP_DEVICE_INTERFACE_DETAIL_DATA);
+                    ZeroMemory(functionClassDeviceData->DevicePath, sizeof(functionClassDeviceData->DevicePath));
+                }
+                else
+                {
+                    goto Done;
+                }
+
+                // Retrieve the information from Plug and Play.
+                if (SetupDiGetDeviceInterfaceDetailA(hardwareDeviceInfo, &deviceInfoData,
+                           functionClassDeviceData, predictedLength, &requiredLength, NULL))
+                {
+                    HidDevice tmp;
+                    BOOLEAN ret;
+                    ret = tmp.open(functionClassDeviceData->DevicePath, FALSE, FALSE, FALSE, FALSE);
+                    *hidDeviceInst = tmp.get();
+
+                    if (!ret)
+                    {
+                        // Save the device path so it can be still listed.
+                        INT iDevicePathSize = INT(strlen(functionClassDeviceData->DevicePath)) + 1;
+
+                        hidDeviceInst->DevicePath = (PCHAR)malloc(iDevicePathSize);
+
+                        if (hidDeviceInst->DevicePath != NULL)
+                        {
+                            StringCbCopyA(hidDeviceInst->DevicePath, iDevicePathSize, functionClassDeviceData->DevicePath);
+                        }
+                    }
+                }
+
+                free(functionClassDeviceData);
+                functionClassDeviceData = NULL;
+            }
+            else
+            {
+                if (ERROR_NO_MORE_ITEMS == GetLastError())
+                {
+                    done = TRUE;
+                    break;
+                }
+            }
+        }
+    }
+
+    *NumberDevices = i;
+Done:
+    if (done == FALSE)
+    {
+        if (*HidDevices != NULL)
+        {
+            free(*HidDevices);
+            *HidDevices = NULL;
+        }
+    }
+
+    if (INVALID_HANDLE_VALUE != hardwareDeviceInfo)
+    {
+        SetupDiDestroyDeviceInfoList (hardwareDeviceInfo);
+        hardwareDeviceInfo = INVALID_HANDLE_VALUE;
+    }
+
+    return done;
 }
 
