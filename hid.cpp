@@ -8,15 +8,22 @@ HidDevice::HidDevice()
     ZeroMemory(&_dev, sizeof(_dev));
 }
 
+HidDevice::~HidDevice()
+{
+
+}
+
 void HidDevice::set(HID_DEVICE dev)
 {
     _dev = dev;
 }
 
+#if 1
 HID_DEVICE HidDevice::get() const
 {
     return _dev;
 }
+#endif
 
 HID_DEVICE *HidDevice::getp()
 {
@@ -82,7 +89,7 @@ Routine Description:
    A return value of TRUE indicates that all data values for the given report
       ID were set without error.
 --*/
-static BOOLEAN PackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
+BOOLEAN HidDevice::PackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
                    HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
                    ULONG DataLength, PHIDP_PREPARSED_DATA Ppd)
 {
@@ -128,7 +135,7 @@ RoutineDescription:
    Given a struct _HID_DEVICE, take the information in the HID_DATA array
    pack it into multiple write reports and send each report to the HID device
 --*/
-BOOLEAN HidWrite(HID_DEVICE *HidDevice)
+BOOLEAN HidDevice::HidWrite(HID_DEVICE *HidDevice)
 {
     // Begin by looping through the HID_DEVICE's HID_DATA structure and setting
     //   the IsDataSet field to FALSE to indicate that each structure has
@@ -152,9 +159,6 @@ BOOLEAN HidWrite(HID_DEVICE *HidDevice)
         if (pData->IsDataSet)
             continue;
 
-        // Package the report for this data structure.  PackReport will
-        //    set the IsDataSet fields of this structure and any other
-        //    structures that it includes in the report with this structure
         PackReport(HidDevice->OutputReportBuffer,
                  HidDevice->Caps.OutputReportByteLength,
                  HidP_Output, pData,
@@ -171,6 +175,11 @@ BOOLEAN HidWrite(HID_DEVICE *HidDevice)
         Status = Status && WriteStatus;
     }
     return Status;
+}
+
+BOOLEAN HidDevice::write()
+{
+    return HidWrite(&_dev);
 }
 
 /*++
@@ -542,9 +551,7 @@ BOOLEAN HidDevice::_FillDeviceInfo(HID_DEVICE *HidDevice)
     if (numCaps > 0)
     {
         if (HIDP_STATUS_SUCCESS != (HidP_GetButtonCaps(HidP_Feature,
-                            buttonCaps,
-                            &numCaps,
-                            HidDevice->Ppd)))
+                            buttonCaps, &numCaps, HidDevice->Ppd)))
         {
             return bRet;
         }
@@ -669,144 +676,76 @@ Done:
 
 BOOLEAN HidDevice::open(LPCSTR path, BOOL hasReadAccess, BOOL hasWriteAccess, BOOL isOverlapped, BOOL isExclusive)
 {
-    return _OpenHidDevice(path, hasReadAccess, hasWriteAccess, isOverlapped, isExclusive, &_dev);
-}
-
-/*++
-RoutineDescription:
-    Given the HardwareDeviceInfo, representing a handle to the plug and
-    play information, and deviceInfoData, representing a specific hid device,
-    open that device and fill in all the relivant information in the given
-    HID_DEVICE structure.
-
-    return if the open and initialization was successfull or not.
-
---*/
-BOOLEAN HidDevice::_OpenHidDevice(LPCSTR DevicePath, BOOL HasReadAccess,
-    BOOL HasWriteAccess, BOOL IsOverlapped, BOOL IsExclusive,
-    HID_DEVICE *HidDevice)
-{
     DWORD accessFlags = 0;
     DWORD sharingFlags = 0;
     BOOLEAN bRet = FALSE;
-    INT iDevicePathSize;
+    HID_DEVICE *HidDevice = &_dev;
     RtlZeroMemory(HidDevice, sizeof(HID_DEVICE));
     HidDevice->HidDevice = INVALID_HANDLE_VALUE;
 
-    if (DevicePath == NULL)
-        goto Done;
+    if (path == NULL)
+        return FALSE;
 
-    iDevicePathSize = INT(strlen(DevicePath) + 1);
+    INT iDevicePathSize = INT(strlen(path) + 1);
     HidDevice->DevicePath = PCHAR(malloc(iDevicePathSize));
 
     if (HidDevice->DevicePath == NULL)
-    {
         goto Done;
-    }
 
-    StringCbCopyA(HidDevice->DevicePath, iDevicePathSize, DevicePath);
+    StringCbCopyA(HidDevice->DevicePath, iDevicePathSize, path);
 
-    if (HasReadAccess)
+    if (hasReadAccess)
         accessFlags |= GENERIC_READ;
 
-    if (HasWriteAccess)
+    if (hasWriteAccess)
         accessFlags |= GENERIC_WRITE;
 
-    if (!IsExclusive)
+    if (!isExclusive)
         sharingFlags = FILE_SHARE_READ | FILE_SHARE_WRITE;
 
-    //  The hid.dll api's do not pass the overlapped structure into deviceiocontrol
-    //  so to use them we must have a non overlapped device.  If the request is for
-    //  an overlapped device we will close the device below and get a handle to an
-    //  overlapped device
-    HidDevice->HidDevice = CreateFileA(DevicePath, accessFlags,
+    HidDevice->HidDevice = CreateFileA(path, accessFlags,
                                sharingFlags, NULL, OPEN_EXISTING, 0, NULL);
 
-    std::cout << HidDevice->HidDevice << " " << DevicePath << "\r\n";
-    std::cout.flush();
-
     if (HidDevice->HidDevice == INVALID_HANDLE_VALUE)
-    {
         goto Done;
-    }
 
-    HidDevice->OpenedForRead = HasReadAccess;
-    HidDevice->OpenedForWrite = HasWriteAccess;
-    HidDevice->OpenedOverlapped = IsOverlapped;
-    HidDevice->OpenedExclusive = IsExclusive;
+    HidDevice->OpenedForRead = hasReadAccess;
+    HidDevice->OpenedForWrite = hasWriteAccess;
+    HidDevice->OpenedOverlapped = isOverlapped;
+    HidDevice->OpenedExclusive = isExclusive;
 
-    //
-    // If the device was not opened as overlapped, then fill in the rest of the
-    //  HidDevice structure.  However, if opened as overlapped, this handle cannot
-    //  be used in the calls to the HidD_ exported functions since each of these
-    //  functions does synchronous I/O.
-    //
-
-    if (!HidD_GetPreparsedData (HidDevice->HidDevice, &HidDevice->Ppd))
-    {
+    if (!HidD_GetPreparsedData(HidDevice->HidDevice, &HidDevice->Ppd))
         goto Done;
-    }
 
-    if (!HidD_GetAttributes (HidDevice->HidDevice, &HidDevice->Attributes))
-    {
+    if (!HidD_GetAttributes(HidDevice->HidDevice, &HidDevice->Attributes))
         goto Done;
-    }
 
-    if (!HidP_GetCaps (HidDevice->Ppd, &HidDevice->Caps))
-    {
+    if (!HidP_GetCaps(HidDevice->Ppd, &HidDevice->Caps))
         goto Done;
-    }
-
-    //
-    // At this point the client has a choice.  It may chose to look at the
-    // Usage and Page of the top level collection found in the HIDP_CAPS
-    // structure.  In this way it could just use the usages it knows about.
-    // If either HidP_GetUsages or HidP_GetUsageValue return an error then
-    // that particular usage does not exist in the report.
-    // This is most likely the preferred method as the application can only
-    // use usages of which it already knows.
-    // In this case the app need not even call GetButtonCaps or GetValueCaps.
-    //
-    // In this example, however, we will call FillDeviceInfo to look for all
-    //    of the usages in the device.
-    //
 
     if (_FillDeviceInfo(HidDevice) == FALSE)
         goto Done;
 
-    if (IsOverlapped)
+    if (isOverlapped)
     {
         CloseHandle(HidDevice->HidDevice);
         HidDevice->HidDevice = INVALID_HANDLE_VALUE;
 
-        HidDevice->HidDevice = CreateFileA(DevicePath, accessFlags,
+        HidDevice->HidDevice = CreateFileA(path, accessFlags,
                                        sharingFlags, NULL, OPEN_EXISTING,
                                        FILE_FLAG_OVERLAPPED, NULL);
 
-        std::cout << HidDevice->HidDevice << " " << DevicePath << "\r\n";
-        std::cout.flush();
-
         if (INVALID_HANDLE_VALUE == HidDevice->HidDevice)
-        {
             goto Done;
-        }
     }
 
     bRet = TRUE;
 
 Done:
     if (!bRet)
-    {
         CloseHidDevice(HidDevice);
-    }
 
-    return (bRet);
-}
-
-VOID CloseHidDevices(HID_DEVICE *HidDevices, ULONG NumberDevices)
-{
-    for (ULONG Index = 0; Index < NumberDevices; Index++)
-        CloseHidDevice(HidDevices + Index);
+    return bRet;
 }
 
 VOID CloseHidDevice(HID_DEVICE *HidDevice)
@@ -900,5 +839,89 @@ VOID CloseHidDevice(HID_DEVICE *HidDevice)
         free(HidDevice->FeatureValueCaps);
         HidDevice->FeatureValueCaps = NULL;
     }
+}
+
+PnPFinder::PnPFinder(GUID guid) : _guid(guid), _i(0), _hasNext(FALSE)
+{
+    _hwDevInfo = ::SetupDiGetClassDevsA(&_guid, 0, 0, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    _devIfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+}
+
+BOOL PnPFinder::hasNext()
+{
+    _hasNext = SetupDiEnumDeviceInterfaces(_hwDevInfo, NULL, &_guid, _i, &_devIfaceData);
+    return _hasNext;
+}
+
+std::string PnPFinder::next()
+{
+    BOOL ret = TRUE;
+
+    if (!_hasNext)
+        ret = SetupDiEnumDeviceInterfaces(_hwDevInfo, NULL, &_guid, _i, &_devIfaceData);
+
+    if (!ret)
+        return std::string("");
+
+    DWORD requiredLength = 0;
+    SetupDiGetDeviceInterfaceDetailA(_hwDevInfo, &_devIfaceData, NULL, 0, &requiredLength, 0);
+    DWORD predictedLength = requiredLength;
+    SP_DEVICE_INTERFACE_DETAIL_DATA_A *devIfaceDetail;
+    devIfaceDetail = PSP_DEVICE_INTERFACE_DETAIL_DATA_A(malloc(requiredLength));
+    devIfaceDetail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_A);
+    ZeroMemory(devIfaceDetail->DevicePath, sizeof(devIfaceDetail->DevicePath));
+
+    SetupDiGetDeviceInterfaceDetailA(_hwDevInfo, &_devIfaceData,
+                      devIfaceDetail, predictedLength, &requiredLength, 0);
+
+    std::string s(devIfaceDetail->DevicePath);
+    _i++;
+    _hasNext = FALSE;
+    return s;
+}
+
+HidFinder::HidFinder()
+{
+    GUID hidGuid;
+    HidD_GetHidGuid(&hidGuid);
+    _pnpFinder = new PnPFinder(hidGuid);
+}
+
+HidFinder::~HidFinder()
+{
+    delete[] _pnpFinder;
+}
+
+BOOL HidFinder::hasNext()
+{
+    return _pnpFinder->hasNext();
+}
+
+HidDevice *HidFinder::next()
+{
+    std::string path = _pnpFinder->next();
+    HidDevice *dev = new HidDevice;
+    BOOL ret = dev->open(path.c_str(), FALSE, FALSE, FALSE, FALSE);
+    return dev;
+}
+
+HidButtonCaps::HidButtonCaps(HIDP_BUTTON_CAPS caps)
+{
+    _caps = caps;
+}
+
+BOOLEAN HidButtonCaps::isRange() const
+{
+    return _caps.IsRange;
+}
+
+USAGE HidButtonCaps::usageMin() const
+{
+    return _caps.Range.UsageMin;
+}
+
+USAGE HidButtonCaps::usageMax() const
+{
+    return _caps.Range.UsageMax;
 }
 

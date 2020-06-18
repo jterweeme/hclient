@@ -23,6 +23,7 @@ Environment:
 #include <windows.h>
 #include <hidsdi.h>
 #include <setupapi.h>
+#include <iostream>
 
 struct SP_FNCLASS_DEVICE_DATA
 {
@@ -94,13 +95,10 @@ struct HID_DEVICE
     HIDP_VALUE_CAPS *FeatureValueCaps;
 };
 
-BOOLEAN HidWrite(HID_DEVICE *HidDevice);
-
 BOOLEAN UnpackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
    HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
    ULONG DataLength, PHIDP_PREPARSED_DATA Ppd);
 
-VOID CloseHidDevices(HID_DEVICE *HidDevices, ULONG NumberDevices);
 VOID CloseHidDevice(HID_DEVICE *HidDevice);
 
 class HidDevice
@@ -108,23 +106,60 @@ class HidDevice
 private:
     HID_DEVICE _dev;
     BOOLEAN _FillDeviceInfo(HID_DEVICE *HidDevice);
+    BOOLEAN HidWrite(HID_DEVICE *HidDevice);
 
-    BOOLEAN _OpenHidDevice(LPCSTR DevicePath, BOOL HasReadAccess,
-                BOOL HasWriteAccess, BOOL IsOverlapped, BOOL IsExclusive,
-                HID_DEVICE *HidDevice);
+    BOOLEAN PackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
+                       HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
+                       ULONG DataLength, PHIDP_PREPARSED_DATA Ppd);
 public:
     HidDevice();
+    ~HidDevice();
     void set(HID_DEVICE dev);
     HID_DEVICE get() const;
     HID_DEVICE *getp();
     LPCSTR devicePath() const;
     BOOLEAN read();
+    BOOLEAN write();
     BOOLEAN readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap);
     void close();
 
-
     BOOLEAN open(LPCSTR path, BOOL hasReadAccess, BOOL hasWriteAccess,
                  BOOL isOverlapped, BOOL isExclusive);
+};
+
+class PnPFinder
+{
+private:
+    GUID _guid;
+    HDEVINFO _hwDevInfo;
+    SP_DEVICE_INTERFACE_DATA _devIfaceData;
+    DWORD _i;
+    BOOL _hasNext;
+public:
+    PnPFinder(GUID guid);
+    BOOL hasNext();
+    std::string next();
+};
+
+class HidFinder
+{
+    PnPFinder *_pnpFinder;
+public:
+    HidFinder();
+    virtual ~HidFinder();
+    BOOL hasNext();
+    HidDevice *next();
+};
+
+class HidButtonCaps
+{
+private:
+    HIDP_BUTTON_CAPS _caps;
+public:
+    HidButtonCaps(HIDP_BUTTON_CAPS caps);
+    BOOLEAN isRange() const;
+    USAGE usageMin() const;
+    USAGE usageMax() const;
 };
 
 #endif
