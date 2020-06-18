@@ -14,7 +14,6 @@ public:
     CList();
     void init();
     PLIST_ENTRY get();
-    PLIST_ENTRY next();
     PLIST_ENTRY head();
     PLIST_ENTRY prev();
     void remove(LIST_ENTRY *node);

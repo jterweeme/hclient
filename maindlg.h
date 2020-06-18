@@ -66,7 +66,7 @@ private:
     rWriteDataStruct rWriteData[MAX_OUTPUT_ELEMENTS];
 public:
     MainDialog(HINSTANCE hInstance);
-    virtual ~MainDialog();
+    ~MainDialog();
     void create();
 };
 #endif

@@ -17,7 +17,10 @@ MainDialog::MainDialog(HINSTANCE hInstance) : _hInstance(hInstance)
 
 MainDialog::~MainDialog()
 {
+    //TODO: Waarom kan dit niet?!
+#if 0
     delete[] _readDlg;
+#endif
 }
 
 void MainDialog::create()
@@ -545,8 +548,7 @@ INT_PTR MainDialog::_command(HWND hDlg, WPARAM wParam)
     case IDOK:
     case IDCANCEL:
         g_physDevList.destroyWithCallback(DestroyDeviceListCallback);
-        EndDialog(hDlg, 0);
-        return TRUE;
+        return EndDialog(hDlg, 0);
     }
     return TRUE;
 }
@@ -952,34 +954,19 @@ INT_PTR MainDialog::_devQuery(LPARAM lParam)
 
 INT_PTR MainDialog::_init(HWND hDlg)
 {
-#if 1
+    g_physDevList.init();
     HidFinder hidFinder;
-    std::cout << hidFinder.next()->devicePath() << "\n";
-    std::cout.flush();
-#if 0
+
+    INT iIndex = 0;
     while (hidFinder.hasNext())
     {
-        std::cout << hidFinder.next()->devicePath() << "\n";
-        std::cout.flush();
-    }
-#endif
-#endif
-    ULONG numberDevices;
-    g_physDevList.init();
-    HID_DEVICE *tempDeviceList = nullptr;
-    _FindKnownHidDevices(&tempDeviceList, &numberDevices);
-    HID_DEVICE *pDevice = tempDeviceList;
-
-    for (ULONG iIndex = 0; iIndex < numberDevices; iIndex++, pDevice++)
-    {
-        DEVICE_LIST_NODE *listNode = PDEVICE_LIST_NODE(malloc(sizeof(DEVICE_LIST_NODE)));
-        listNode->HidDeviceInfo = *pDevice;
-        listNode->DeviceOpened = (INVALID_HANDLE_VALUE == pDevice->HidDevice) ? FALSE : TRUE;
+        HidDevice *dev = hidFinder.next();
+        DEVICE_LIST_NODE *listNode = new DEVICE_LIST_NODE;
+        listNode->HidDeviceInfo = dev->get();
+        listNode->DeviceOpened = dev->getp()->HidDevice ? FALSE : TRUE;
 
         if (listNode->DeviceOpened)
         {
-            // Register this device node with the PnP system so the dialog
-            //  window can recieve notification if this device is unplugged.
             if (!_registerHidDevice(hDlg, listNode))
             {
                 CHAR szTempBuff[SMALL_BUFF];
@@ -992,11 +979,15 @@ INT_PTR MainDialog::_init(HWND hDlg)
             }
         }
 
-        g_physDevList.insertTail(PLIST_ENTRY(listNode));
-    }
+        if (dev->devicePath())
+        {
+            std::cout << dev->devicePath() << "\n";
+            std::cout.flush();
+        }
 
-    // Free the temporary device list...It is no longer needed
-    free(tempDeviceList);
+        g_physDevList.insertTail(PLIST_ENTRY(listNode));
+        iIndex++;
+    }
 
     // Register for notification from the HidDevice class.  Doing so
     //  allows the dialog box to receive device change notifications
@@ -1028,15 +1019,13 @@ INT_PTR MainDialog::_init(HWND hDlg)
 
 INT_PTR MainDialog::_devRemove(HWND hDlg, LPARAM lParam)
 {
-    PDEV_BROADCAST_HDR broadcastHdr = PDEV_BROADCAST_HDR(lParam);
+    DEV_BROADCAST_HDR *broadcastHdr = PDEV_BROADCAST_HDR(lParam);
 
     if (broadcastHdr->dbch_devicetype != DBT_DEVTYP_HANDLE)
         return TRUE;
 
-    PDEV_BROADCAST_HANDLE broadcastHandle;
+    DEV_BROADCAST_HANDLE *broadcastHandle;
     broadcastHandle = PDEV_BROADCAST_HANDLE(lParam);
-
-    // Get the handle for device notification
     HDEVNOTIFY notificationHandle = broadcastHandle->dbch_hdevnotify;
 
     // Search the physical device list for the handle that
@@ -1068,132 +1057,5 @@ INT_PTR MainDialog::_devRemove(HWND hDlg, LPARAM lParam)
     }
 
     return TRUE;
-}
-
-/*++
-Routine Description:
-   Do the required PnP things in order to find all the HID devices in
-   the system at this time.
---*/
-BOOLEAN MainDialog::_FindKnownHidDevices(HID_DEVICE **HidDevices, ULONG *NumberDevices)
-{
-    GUID hidGuid;
-    HidD_GetHidGuid(&hidGuid);
-    *HidDevices = NULL;
-    *NumberDevices = 0;
-
-    HDEVINFO hwDevInfo;
-    hwDevInfo = ::SetupDiGetClassDevs(&hidGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-
-    if (hwDevInfo == INVALID_HANDLE_VALUE)
-        return FALSE;
-
-    // Take a wild guess to start
-    *NumberDevices = 4;
-    BOOLEAN done = FALSE;
-    SP_DEVICE_INTERFACE_DATA deviceInfoData;
-    deviceInfoData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-    ULONG i = 0;
-    while (!done)
-    {
-        *NumberDevices *= 2;
-
-        if (*HidDevices)
-        {
-            void *tmp = ::realloc(*HidDevices, *NumberDevices * sizeof(HID_DEVICE));
-            HID_DEVICE *newHidDevices = reinterpret_cast<HID_DEVICE *>(tmp);
-
-            if (newHidDevices == NULL)
-                free(*HidDevices);
-
-            *HidDevices = newHidDevices;
-        }
-        else
-        {
-            void *tmp = ::calloc(*NumberDevices, sizeof(HID_DEVICE));
-            *HidDevices = reinterpret_cast<HID_DEVICE *>(tmp);
-        }
-
-        if (*HidDevices == NULL)
-            goto Done;
-
-        HID_DEVICE *hidDeviceInst = *HidDevices + i;
-
-        for (; i < *NumberDevices; i++, hidDeviceInst++)
-        {
-            // Initialize an empty HID_DEVICE
-            ::RtlZeroMemory(hidDeviceInst, sizeof(HID_DEVICE));
-            hidDeviceInst->HidDevice = INVALID_HANDLE_VALUE;
-
-            if (::SetupDiEnumDeviceInterfaces(hwDevInfo, 0, &hidGuid, i, &deviceInfoData))
-            {
-                ULONG requiredLength = 0;
-                ::SetupDiGetDeviceInterfaceDetailA(hwDevInfo, &deviceInfoData, NULL, 0, &requiredLength, NULL);
-                ULONG predictedLength = requiredLength;
-                SP_DEVICE_INTERFACE_DETAIL_DATA_A *functionClassDeviceData;
-                functionClassDeviceData = PSP_DEVICE_INTERFACE_DETAIL_DATA_A(malloc(predictedLength));
-                functionClassDeviceData->cbSize = sizeof (SP_DEVICE_INTERFACE_DETAIL_DATA);
-                ZeroMemory(functionClassDeviceData->DevicePath, sizeof(functionClassDeviceData->DevicePath));
-
-                // Retrieve the information from Plug and Play.
-                if (SetupDiGetDeviceInterfaceDetailA(hwDevInfo, &deviceInfoData,
-                           functionClassDeviceData, predictedLength, &requiredLength, NULL))
-                {
-                    HidDevice tmp;
-                    BOOLEAN ret;
-                    ret = tmp.open(functionClassDeviceData->DevicePath, FALSE, FALSE, FALSE, FALSE);
-                    *hidDeviceInst = tmp.get();
-#if 1
-                    if (!ret)
-                    {
-                        std::cout << "Kan niet openen!" << "\n";
-                        std::cout.flush();
-                        // Save the device path so it can be still listed.
-                        INT iDevicePathSize = INT(strlen(functionClassDeviceData->DevicePath)) + 1;
-
-                        hidDeviceInst->DevicePath = PCHAR(malloc(iDevicePathSize));
-
-                        if (hidDeviceInst->DevicePath != NULL)
-                        {
-                            StringCbCopyA(hidDeviceInst->DevicePath, iDevicePathSize, functionClassDeviceData->DevicePath);
-                        }
-                    }
-#endif
-                }
-
-                free(functionClassDeviceData);
-                functionClassDeviceData = NULL;
-            }
-            else
-            {
-
-                if (ERROR_NO_MORE_ITEMS == GetLastError())
-                {
-                    done = TRUE;
-                    break;
-                }
-            }
-        }
-    }
-
-    *NumberDevices = i;
-Done:
-    if (done == FALSE)
-    {
-        if (*HidDevices != NULL)
-        {
-            free(*HidDevices);
-            *HidDevices = NULL;
-        }
-    }
-
-    if (INVALID_HANDLE_VALUE != hwDevInfo)
-    {
-        ::SetupDiDestroyDeviceInfoList(hwDevInfo);
-        hwDevInfo = INVALID_HANDLE_VALUE;
-    }
-
-    return done;
 }
 

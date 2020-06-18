@@ -7,32 +7,27 @@ CList::CList()
 
 void CList::init()
 {
-    _list->Flink = _list->Blink = _list;
-}
-
-PLIST_ENTRY CList::next()
-{
-    return _list->Flink;
+    _lijst.Flink = _lijst.Blink = &_lijst;
 }
 
 PLIST_ENTRY CList::head()
 {
-    return _list->Flink;
+    return _lijst.Flink;
 }
 
 PLIST_ENTRY CList::prev()
 {
-    return _list->Blink;
+    return _lijst.Blink;
 }
 
 PLIST_ENTRY CList::get()
 {
-    return _list;
+    return &_lijst;
 }
 
 void CList::insertTail(LIST_ENTRY *node)
 {
-    LIST_ENTRY *xList = _list;
+    LIST_ENTRY *xList = &_lijst;
     LIST_ENTRY *xBlink = xList->Blink;
     node->Flink = xList;
     node->Blink = xBlink;
@@ -42,7 +37,7 @@ void CList::insertTail(LIST_ENTRY *node)
 
 BOOL CList::isEmpty() const
 {
-    return _list->Flink == _list;
+    return _lijst.Flink == &_lijst;
 }
 
 PLIST_ENTRY CList::removeHead()

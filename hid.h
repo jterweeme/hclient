@@ -118,6 +118,7 @@ public:
     HID_DEVICE get() const;
     HID_DEVICE *getp();
     LPCSTR devicePath() const;
+
     BOOLEAN read();
     BOOLEAN write();
     BOOLEAN readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap);
