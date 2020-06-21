@@ -30,6 +30,7 @@ private:
     static constexpr INT MAX_LB_ITEMS = 200;
 public:
     ReadDialog(HINSTANCE hInst);
+    ~ReadDialog();
     void create(HWND hDlg, HidDevice *dev);
 };
 

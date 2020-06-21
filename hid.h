@@ -118,6 +118,7 @@ public:
     HID_DEVICE get() const;
     HID_DEVICE *getp();
     LPCSTR devicePath() const;
+    HANDLE handle() const;
 
     BOOLEAN read();
     BOOLEAN write();
@@ -126,30 +127,6 @@ public:
 
     BOOLEAN open(LPCSTR path, BOOL hasReadAccess, BOOL hasWriteAccess,
                  BOOL isOverlapped, BOOL isExclusive);
-};
-
-class PnPFinder
-{
-private:
-    GUID _guid;
-    HDEVINFO _hwDevInfo;
-    SP_DEVICE_INTERFACE_DATA _devIfaceData;
-    DWORD _i;
-    BOOL _hasNext;
-public:
-    PnPFinder(GUID guid);
-    BOOL hasNext();
-    std::string next();
-};
-
-class HidFinder
-{
-    PnPFinder *_pnpFinder;
-public:
-    HidFinder();
-    virtual ~HidFinder();
-    BOOL hasNext();
-    HidDevice *next();
 };
 
 class HidButtonCaps

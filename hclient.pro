@@ -1,15 +1,23 @@
 TEMPLATE = app
 
-SOURCES += hid.cpp\
+SOURCES += combobox.cpp\
+    hid.cpp\
+    hidfinder.cpp\
+    hidinfo.cpp\
     list.cpp\
+    listbox.cpp\
     main.cpp\
     maindlg.cpp\
     readdlg.cpp\
     writedlg.cpp
 
-HEADERS += hclient.h\
+HEADERS += combobox.h\
+    hclient.h\
     hid.h\
+    hidfinder.h\
+    hidinfo.h\
     list.h\
+    listbox.h\
     maindlg.h\
     readdlg.h\
     resource.h\

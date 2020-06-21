@@ -2,12 +2,17 @@
 #include "hclient.h"
 #include "resource.h"
 #include <strsafe.h>
+#include <iostream>
 
 ReadDialog *ReadDialog::_instance;
 
 ReadDialog::ReadDialog(HINSTANCE hInst) : _hInst(hInst)
 {
     _instance = this;
+}
+
+ReadDialog::~ReadDialog()
+{
 }
 
 INT_PTR CALLBACK ReadDialog::_readDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)

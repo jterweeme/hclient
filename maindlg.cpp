@@ -2,25 +2,20 @@
 #include "resource.h"
 #include "readdlg.h"
 #include "writedlg.h"
+#include "hidfinder.h"
+#include "hidinfo.h"
 #include <dbt.h>
 #include <iostream>
-#include <SetupAPI.h>
 
 typedef DEVICE_LIST_NODE *PDEVICE_LIST_NODE;
 
 MainDialog::MainDialog(HINSTANCE hInstance) : _hInstance(hInstance)
 {
     _instance = this;
-    _readDlg = new ReadDialog(hInstance);
-    _writeDlg = new WriteDialog(hInstance);
 }
 
 MainDialog::~MainDialog()
 {
-    //TODO: Waarom kan dit niet?!
-#if 0
-    delete[] _readDlg;
-#endif
 }
 
 void MainDialog::create()
@@ -41,14 +36,14 @@ MainDialog::bMainDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return _instance->dlgProc(hDlg, message, wParam, lParam);
 }
 
-HidDevice *MainDialog::_getCurrentDevice(HWND hDlg)
+HidDevice *MainDialog::_getCurrentDevice() const
 {
-    INT i = INT(SendDlgItemMessage(hDlg, IDC_DEVICES, CB_GETCURSEL, 0, 0));
+    INT i = INT(_cbDevices.sendMsgA(CB_GETCURSEL, 0, 0));
 
     if (i == CB_ERR)
         return nullptr;
 
-    LRESULT lresult = SendDlgItemMessageA(hDlg, IDC_DEVICES, CB_GETITEMDATA, i, 0);
+    LRESULT lresult = _cbDevices.sendMsgA(CB_GETITEMDATA, i, 0);
     HID_DEVICE *dev = reinterpret_cast<HID_DEVICE *>(lresult);
     HidDevice *ret = new HidDevice;
     ret->set(*dev);
@@ -75,7 +70,7 @@ BOOL MainDialog::_bGetData(rWriteDataStruct *pItems, INT iCount, HWND hParent)
     return iResult;
 }
 
-BOOL MainDialog::_registerHidDevice(HWND WindowHandle, DEVICE_LIST_NODE *DeviceNode)
+BOOL MainDialog::_registerHidDevice(HWND WindowHandle, DEVICE_LIST_NODE *DeviceNode) const
 {
     DEV_BROADCAST_HANDLE broadcastHandle;
     broadcastHandle.dbch_size = sizeof(DEV_BROADCAST_HANDLE);
@@ -101,101 +96,14 @@ VOID MainDialog::DestroyDeviceListCallback(LIST_ENTRY *ListNode)
     if (deviceNode->NotificationHandle != NULL)
         UnregisterDeviceNotification(deviceNode->NotificationHandle);
 
-    free(deviceNode);
+    delete deviceNode;
 }
 
-LRESULT MainDialog::addStrToCtrl(HWND hCtrl, STRSAFE_LPCSTR pszFormat, ...)
-{
-    CHAR buf[SMALL_BUFF];
-    va_list vl;
-    va_start(vl, pszFormat);
-    StringCbVPrintfA(buf, SMALL_BUFF, pszFormat, vl);
-    va_end(vl);
-    return SendMessageA(hCtrl, LB_ADDSTRING, 0, LPARAM(buf));
-}
-
-void MainDialog::_displayDeviceCaps(HIDP_CAPS *pCaps, HWND hControl)
-{
-    SendMessageA(hControl, LB_RESETCONTENT, 0, 0);
-    addStrToCtrl(hControl, "Usage Page: 0x%x", pCaps->UsagePage);
-    addStrToCtrl(hControl, "Usage: 0x%x", pCaps->Usage);
-    addStrToCtrl(hControl, "Input report byte length: %d", pCaps->InputReportByteLength);
-    addStrToCtrl(hControl, "Output report byte length: %d", pCaps->OutputReportByteLength);
-    addStrToCtrl(hControl, "Feature report byte length: %d", pCaps->FeatureReportByteLength);
-    addStrToCtrl(hControl, "Number of collection nodes %d: ", pCaps->NumberLinkCollectionNodes);
-}
-
-void MainDialog::_displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, HWND hControl)
-{
-    HidButtonCaps caps(*pButton);
-    CHAR szTempBuff[SMALL_BUFF];
-    addStrToCtrl(hControl, "Report ID: 0x%x", pButton->ReportID);
-    addStrToCtrl(hControl, "Usage Page: 0x%x", pButton->UsagePage);
-    addStrToCtrl(hControl, "Alias: %s", pButton->IsAlias ? "TRUE" : "FALSE");
-    addStrToCtrl(hControl, "Link Collection: %hu", pButton->LinkCollection);
-    addStrToCtrl(hControl, "Link Usage Page: 0x%x", pButton->LinkUsagePage);
-    addStrToCtrl(hControl, "Link Usage: 0x%x", pButton->LinkUsage);
-
-    if (caps.isRange())
-    {
-        addStrToCtrl(hControl, "Usage Min: 0x%x, Usage Max: 0x%x",
-                     caps.usageMin(), caps.usageMax());
-    }
-    else
-    {
-        addStrToCtrl(hControl, "Usage: 0x%x", pButton->NotRange.Usage);
-    }
-
-    if (pButton->IsRange)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF,
-                 "Data Index Min: 0x%x, Data Index Max: 0x%x",
-                 pButton->Range.DataIndexMin, pButton->Range.DataIndexMax);
-    }
-    else
-    {
-         StringCbPrintfA(szTempBuff, SMALL_BUFF, "DataIndex: 0x%x", pButton->NotRange.DataIndex);
-    }
-
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-
-    if (pButton->IsStringRange)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "String Min: 0x%x, String Max: 0x%x",
-                       pButton->Range.StringMin, pButton->Range.StringMax);
-    }
-    else
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "String Index: 0x%x", pButton->NotRange.StringIndex);
-    }
-
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-
-    if (pButton->IsDesignatorRange)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF,
-                       "Designator Min: 0x%x, Designator Max: 0x%x",
-                       pButton->Range.DesignatorMin,
-                       pButton->Range.DesignatorMax);
-    }
-    else
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Designator Index: 0x%x",
-                       pButton->NotRange.DesignatorIndex);
-    }
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-
-    if (pButton->IsAbsolute)
-        SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM("Absolute: Yes"));
-    else
-        SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM("Absolute: No"));
-}
-
-void MainDialog::_loadDevices(HWND hDeviceCombo)
+void MainDialog::_loadDevices()
 {
     CHAR szTempBuff[SMALL_BUFF];
     INT iIndex;
-    SendMessage(hDeviceCombo, CB_RESETCONTENT, 0, 0);
+    _cbDevices.sendMsgA(CB_RESETCONTENT, 0, 0);
     CListIterator it(&g_physDevList);
 
     for (INT i = 0; it.hasNext(); i++)
@@ -204,12 +112,14 @@ void MainDialog::_loadDevices(HWND hDeviceCombo)
 
         if (currNode->HidDeviceInfo.HidDevice != INVALID_HANDLE_VALUE)
         {
+            USHORT vid = currNode->HidDeviceInfo.Attributes.VendorID;
+            USHORT pid = currNode->HidDeviceInfo.Attributes.ProductID;
+            USHORT usagePage = currNode->HidDeviceInfo.Caps.UsagePage;
+            USHORT usage = currNode->HidDeviceInfo.Caps.Usage;
+
             StringCbPrintfA(szTempBuff, SMALL_BUFF,
-                    "Device #%d: VID: 0x%04X  PID: 0x%04X  UsagePage: 0x%X  Usage: 0x%X", i,
-                    currNode->HidDeviceInfo.Attributes.VendorID,
-                    currNode->HidDeviceInfo.Attributes.ProductID,
-                    currNode->HidDeviceInfo.Caps.UsagePage,
-                    currNode->HidDeviceInfo.Caps.Usage);
+                    "Device #%d: VID: 0x%04X  PID: 0x%04X  UsagePage: 0x%X  Usage: 0x%X",
+                    i, vid, pid, usagePage, usage);
         }
         else
         {
@@ -218,229 +128,37 @@ void MainDialog::_loadDevices(HWND hDeviceCombo)
                             currNode->HidDeviceInfo.DevicePath : "");
         }
 
-        iIndex = INT(SendMessageA(hDeviceCombo, CB_ADDSTRING, 0, LPARAM(szTempBuff)));
+        iIndex = INT(_cbDevices.sendMsgA(CB_ADDSTRING, 0, LPARAM(szTempBuff)));
 
-        if (CB_ERR != iIndex && INVALID_HANDLE_VALUE != currNode->HidDeviceInfo.HidDevice)
+        if (iIndex != CB_ERR && INVALID_HANDLE_VALUE != currNode->HidDeviceInfo.HidDevice)
         {
-            SendMessageA(hDeviceCombo, CB_SETITEMDATA, iIndex, LPARAM(&currNode->HidDeviceInfo));
+            _cbDevices.sendMsgA(CB_SETITEMDATA, iIndex, LPARAM(&currNode->HidDeviceInfo));
         }
     }
 
-    SendMessage(hDeviceCombo, CB_SETCURSEL, 0, 0);
+    _cbDevices.sendMsgA(CB_SETCURSEL, 0, 0);
 }
 
-void MainDialog::_displayFeatureValues(HidDevice *pDevice, HWND hControl)
+void MainDialog::_loadItemTypes() const
 {
-    CHAR szTempBuff[SMALL_BUFF];
-    SendMessage(hControl, LB_RESETCONTENT, 0, 0);
-    HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->FeatureValueCaps;
-
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberFeatureValueCaps; iLoop++)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Feature value cap # %d", iLoop);
-        INT iIndex = INT(SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff)));
-
-        if (iIndex != -1)
-            SendMessageA(hControl, LB_SETITEMDATA, iIndex, LPARAM(pValueCaps));
-
-        pValueCaps++;
-    }
-
-    SendMessage(hControl, LB_SETCURSEL, 0, 0);
-}
-
-void MainDialog::_displayOutputValues(HidDevice *pDevice, HWND hControl)
-{
-    SendMessage(hControl, LB_RESETCONTENT, 0, 0);
-    HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->OutputValueCaps;
-
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberOutputValueCaps; iLoop++)
-    {
-        INT iIndex = INT(addStrToCtrl(hControl, "Output value cap # %d", iLoop));
-
-        if (iIndex != -1)
-            SendMessageA(hControl, LB_SETITEMDATA, iIndex, LPARAM(pValueCaps));
-
-        pValueCaps++;
-    }
-
-    SendMessage(hControl, LB_SETCURSEL, 0, 0);
-}
-
-void MainDialog::_displayValueAttributes(HIDP_VALUE_CAPS *pValue, HWND hControl)
-{
-    CHAR szTempBuff[SMALL_BUFF];
-    addStrToCtrl(hControl, "Report ID 0x%x", pValue->ReportID);
-    addStrToCtrl(hControl, "Usage Page: 0x%x", pValue->UsagePage);
-    addStrToCtrl(hControl, "Bit size: 0x%x", pValue->BitSize);
-    addStrToCtrl(hControl, "Report Count: 0x%x", pValue->ReportCount);
-    addStrToCtrl(hControl, "Unit Exponent: 0x%x", pValue->UnitsExp);
-    addStrToCtrl(hControl, "Has Null: 0x%x", pValue->HasNull);
-    addStrToCtrl(hControl, pValue->IsAlias ? "Alias" : "=====");
-
-    if (pValue->IsRange)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Usage Min: 0x%x, Usage Max 0x%x",
-                       pValue->Range.UsageMin, pValue->Range.UsageMax);
-    }
-    else
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Usage: 0x%x", pValue->NotRange.Usage);
-    }
-
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-
-    if (pValue->IsRange)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF,
-                       "Data Index Min: 0x%x, Data Index Max: 0x%x",
-                       pValue->Range.DataIndexMin,
-                       pValue->Range.DataIndexMax);
-    }
-    else
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "DataIndex: 0x%x", pValue->NotRange.DataIndex);
-    }
-
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-
-    addStrToCtrl(hControl, "Physical Minimum: %d, Physical Maximum: %d",
-                 pValue->PhysicalMin, pValue->PhysicalMax);
-
-    addStrToCtrl(hControl, "Logical Minimum: 0x%x, Logical Maximum: 0x%x",
-                 pValue->LogicalMin, pValue->LogicalMax);
-
-    if (pValue->IsStringRange)
-    {
-       StringCbPrintfA(szTempBuff, SMALL_BUFF, "String  Min: 0x%x String Max 0x%x",
-                       pValue->Range.StringMin, pValue->Range.StringMax);
-    }
-    else
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "String Index: 0x%x",
-                        pValue->NotRange.StringIndex);
-    }
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-
-    if (pValue->IsDesignatorRange)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Designator Minimum: 0x%x, Max: 0x%x",
-                        pValue->Range.DesignatorMin, pValue->Range.DesignatorMax);
-    }
-    else
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Designator Index: 0x%x",
-                        pValue->NotRange.DesignatorIndex);
-    }
-
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
-
-    addStrToCtrl(hControl, pValue->IsAbsolute ? "Absolute: Yes" : "Absolute: No");
-}
-
-void MainDialog::_displayInputButtons(HidDevice *pDevice, HWND hControl)
-{
-    SendMessageA(hControl, LB_RESETCONTENT, 0, LPARAM(0));
-    HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->InputButtonCaps;
-    const USHORT nCaps = pDevice->getp()->Caps.NumberInputButtonCaps;
-
-    for (INT iLoop = 0; iLoop < nCaps; iLoop++)
-    {
-        INT iIndex = INT(addStrToCtrl(hControl, "Input button cap # %d", iLoop));
-
-        if (iIndex != -1)
-            SendMessageA(hControl, LB_SETITEMDATA, iIndex, LPARAM(pButtonCaps));
-
-        pButtonCaps++;
-    }
-
-    SendMessage(hControl, LB_SETCURSEL, 0, 0);
-}
-
-void MainDialog::_displayFeatureButtons(HidDevice *pDevice, HWND hControl)
-{
-    CHAR szTempBuff[SMALL_BUFF];
-    SendMessage(hControl, LB_RESETCONTENT, 0, 0);
-    HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->FeatureButtonCaps;
-
-    USHORT nCaps = pDevice->getp()->Caps.NumberFeatureButtonCaps;
-    for (USHORT iLoop = 0; iLoop < nCaps; iLoop++)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Feature button cap # %d", iLoop);
-        INT iIndex = INT(SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff)));
-
-        if (iIndex != -1)
-            SendMessageA(hControl, LB_SETITEMDATA, iIndex, LPARAM(pButtonCaps));
-
-        pButtonCaps++;
-    }
-    SendMessage(hControl, LB_SETCURSEL, 0, 0);
-}
-
-void MainDialog::_displayInputValues(HidDevice *pDevice, HWND hCtrl)
-{
-    CHAR szTempBuff[SMALL_BUFF];
-    SendMessage(hCtrl, LB_RESETCONTENT, 0, 0);
-    HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->InputValueCaps;
-
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberInputValueCaps; iLoop++)
-    {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "Input value cap # %d", iLoop);
-        INT iIndex = INT(SendMessageA(hCtrl, LB_ADDSTRING, 0, LPARAM(szTempBuff)));
-
-        if (iIndex != -1)
-            SendMessageA(hCtrl, LB_SETITEMDATA, iIndex, LPARAM(pValueCaps));
-
-        pValueCaps++;
-    }
-
-    SendMessage(hCtrl, LB_SETCURSEL, 0, 0);
-}
-
-void MainDialog::_displayOutputButtons(HidDevice *pDevice, HWND hControl)
-{
-    SendMessage(hControl, LB_RESETCONTENT, 0, LPARAM(0));
-    HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->OutputButtonCaps;
-
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberOutputButtonCaps; iLoop++)
-    {
-        INT iIndex = INT(addStrToCtrl(hControl, "Output button cap # %d", iLoop));
-
-        if (iIndex != -1)
-            SendMessageA(hControl, LB_SETITEMDATA, iIndex, LPARAM(pButtonCaps));
-
-        pButtonCaps++;
-    }
-
-    SendMessage(hControl, LB_SETCURSEL, 0, 0);
-}
-
-void MainDialog::_loadItemTypes(HWND hItemTypes)
-{
-    INT iIndex = INT(SendMessageA(hItemTypes, CB_ADDSTRING, 0, LPARAM("INPUT BUTTON")));
-    SendMessageA(hItemTypes, CB_SETITEMDATA, iIndex, INPUT_BUTTON);
-    iIndex = INT(SendMessageA(hItemTypes, CB_ADDSTRING, 0, LPARAM("INPUT VALUE")));
-    SendMessageA(hItemTypes, CB_SETITEMDATA, iIndex, INPUT_VALUE);
-    iIndex = INT(SendMessageA(hItemTypes, CB_ADDSTRING, 0, LPARAM("OUTPUT BUTTON")));
-    SendMessageA(hItemTypes, CB_SETITEMDATA, iIndex, OUTPUT_BUTTON);
-    iIndex = INT(SendMessageA(hItemTypes, CB_ADDSTRING, 0, LPARAM("OUTPUT VALUE")));
-    SendMessageA(hItemTypes, CB_SETITEMDATA, iIndex, OUTPUT_VALUE);
-    iIndex = INT(SendMessageA(hItemTypes, CB_ADDSTRING, 0, LPARAM("FEATURE BUTTON")));
-    SendMessageA(hItemTypes, CB_SETITEMDATA, iIndex, FEATURE_BUTTON);
-    iIndex = INT(SendMessageA(hItemTypes, CB_ADDSTRING, 0, (LPARAM) "FEATURE VALUE"));
-    SendMessageA(hItemTypes, CB_SETITEMDATA, iIndex, FEATURE_VALUE);
-    iIndex = INT(SendMessageA(hItemTypes, CB_ADDSTRING, 0, LPARAM("HID CAPS")));
-    SendMessageA(hItemTypes, CB_SETITEMDATA, iIndex, HID_CAPS);
-    iIndex = INT(SendMessageA(hItemTypes, CB_ADDSTRING, 0, LPARAM("DEVICE ATTRIBUTES")));
-    SendMessageA(hItemTypes, CB_SETITEMDATA, iIndex, DEVICE_ATTRIBUTES);
-    SendMessage(hItemTypes, CB_SETCURSEL, 0, 0);
-}
-
-void MainDialog::_displayDeviceAttributes(HIDD_ATTRIBUTES *pAttrib, HWND hCtrl)
-{
-    addStrToCtrl(hCtrl, "Vendor ID: 0x%x", pAttrib->VendorID);
-    addStrToCtrl(hCtrl, "Product ID: 0x%x", pAttrib->ProductID);
-    addStrToCtrl(hCtrl, "Version Number  0x%x", pAttrib->VersionNumber);
+    INT iIndex;
+    iIndex = INT(_cbItemType.sendMsgA(CB_ADDSTRING, 0, LPARAM("INPUT BUTTON")));
+    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, INPUT_BUTTON);
+    iIndex = INT(_cbItemType.sendMsgA(CB_ADDSTRING, 0, LPARAM("INPUT VALUE")));
+    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, INPUT_VALUE);
+    iIndex = INT(_cbItemType.sendMsgA(CB_ADDSTRING, 0, LPARAM("OUTPUT BUTTON")));
+    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, OUTPUT_BUTTON);
+    iIndex = INT(_cbItemType.sendMsgA(CB_ADDSTRING, 0, LPARAM("OUTPUT VALUE")));
+    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, OUTPUT_VALUE);
+    iIndex = INT(_cbItemType.sendMsgA(CB_ADDSTRING, 0, LPARAM("FEATURE BUTTON")));
+    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, FEATURE_BUTTON);
+    iIndex = INT(_cbItemType.sendMsgA(CB_ADDSTRING, 0, LPARAM("FEATURE VALUE")));
+    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, FEATURE_VALUE);
+    iIndex = INT(_cbItemType.sendMsgA(CB_ADDSTRING, 0, LPARAM("HID CAPS")));
+    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, HID_CAPS);
+    iIndex = INT(_cbItemType.sendMsgA(CB_ADDSTRING, 0, LPARAM("DEVICE ATTRIBUTES")));
+    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, DEVICE_ATTRIBUTES);
+    _cbItemType.sendMsgA(CB_SETCURSEL, 0, 0);
 }
 
 BOOL MainDialog::_setButtonUsages(HID_DATA *pCap, LPSTR pszInputString)
@@ -480,7 +198,7 @@ BOOL MainDialog::_parseData(HID_DATA *pData, rWriteDataStruct rWriteData[],
         // Check to see if our data is a value cap or not
         if (!pWalk->IsButtonData)
         {
-            pWalk -> ValueData.Value = atol(rWriteData[iCap].szValue);
+            pWalk->ValueData.Value = atol(rWriteData[iCap].szValue);
         }
         else if (!_setButtonUsages(pWalk, rWriteData[iCap].szValue))
         {
@@ -494,7 +212,7 @@ BOOL MainDialog::_parseData(HID_DATA *pData, rWriteDataStruct rWriteData[],
 }
 
 INT MainDialog::_prepareDataFields(HID_DATA *pData, ULONG ulDataLength,
-    rWriteDataStruct rWriteData[], int iMaxElements)
+    rWriteDataStruct rWriteData[], int iMaxElements) const
 {
     INT i;
     HID_DATA *pWalk = pData;
@@ -544,18 +262,19 @@ INT_PTR MainDialog::_command(HWND hDlg, WPARAM wParam)
     case IDC_ABOUT:
         MessageBoxA(hDlg, "Sample HID client Application.  Microsoft Corp \nCopyright (C) 1997",
                     "About HClient", MB_ICONINFORMATION);
-        return TRUE;
+        return FALSE;
     case IDOK:
     case IDCANCEL:
         g_physDevList.destroyWithCallback(DestroyDeviceListCallback);
-        return EndDialog(hDlg, 0);
+        EndDialog(hDlg, 0);
+        return FALSE;
     }
-    return TRUE;
+    return FALSE;
 }
 
 INT_PTR MainDialog::_write(HWND hDlg)
 {
-    HidDevice *pDevice = _getCurrentDevice(hDlg);
+    HidDevice *pDevice = _getCurrentDevice();
 
     if (pDevice == nullptr)
         return FALSE;
@@ -599,26 +318,26 @@ INT_PTR MainDialog::_write(HWND hDlg)
             }
         }
     }
-    CloseHidDevice(writeDevice2.getp());
-    return TRUE;
+    writeDevice2.close();
+    return FALSE;
 }
 
 INT_PTR MainDialog::_read(HWND hDlg)
 {
-    HidDevice *pDevice = _getCurrentDevice(hDlg);
+    HidDevice *pDevice = _getCurrentDevice();
 
     if (pDevice != nullptr && _readDlg != nullptr)
         _readDlg->create(hDlg, pDevice);
 
-    return TRUE;
+    return FALSE;
 }
 
 INT_PTR MainDialog::_devices(HWND hDlg, WPARAM wParam)
 {
     if (HIWORD(wParam != CBN_SELCHANGE))
-        return TRUE;
+        return FALSE;
 
-    HidDevice *pDevice2 = _getCurrentDevice(hDlg);
+    HidDevice *pDevice2 = _getCurrentDevice();
     EnableWindow(GetDlgItem(hDlg, IDC_EXTCALLS), pDevice2 != nullptr);
 
     EnableWindow(GetDlgItem(hDlg, IDC_READ), pDevice2 != nullptr &&
@@ -633,7 +352,7 @@ INT_PTR MainDialog::_devices(HWND hDlg, WPARAM wParam)
     PostMessageA(hDlg, WM_COMMAND, IDC_TYPE + (CBN_SELCHANGE<<16),
                 LPARAM(GetDlgItem(hDlg, IDC_TYPE)));
 
-    return TRUE;
+    return FALSE;
 }
 
 INT_PTR MainDialog::_typeProc(HWND hDlg, WPARAM wParam)
@@ -641,41 +360,42 @@ INT_PTR MainDialog::_typeProc(HWND hDlg, WPARAM wParam)
     if (HIWORD(wParam) != CBN_SELCHANGE)
         return FALSE;
 
-    HidDevice *pDevice2 = _getCurrentDevice(hDlg);
+    HidDevice *pDevice2 = _getCurrentDevice();
     SendDlgItemMessage(hDlg, IDC_ITEMS, LB_RESETCONTENT, 0, 0);
     SendDlgItemMessage(hDlg, IDC_ATTRIBUTES, LB_RESETCONTENT, 0, 0);
 
     if (pDevice2 == nullptr)
-        return TRUE;
+        return FALSE;
 
     INT iIndex = INT(SendDlgItemMessage(hDlg, IDC_TYPE, CB_GETCURSEL, 0, 0));
     INT iItemType = INT(SendDlgItemMessageA(hDlg, IDC_TYPE, CB_GETITEMDATA, iIndex, 0));
+    HidInfo h;
 
     switch (iItemType)
     {
     case INPUT_BUTTON:
-        _displayInputButtons(pDevice2, GetDlgItem(hDlg, IDC_ITEMS));
+        h.displayInputButtons(pDevice2, _lbItems);
         break;
     case INPUT_VALUE:
-        _displayInputValues(pDevice2, GetDlgItem(hDlg, IDC_ITEMS));
+        h.displayInputValues(pDevice2, _lbItems);
         break;
     case OUTPUT_BUTTON:
-        _displayOutputButtons(pDevice2, GetDlgItem(hDlg, IDC_ITEMS));
+        h.displayOutputButtons(pDevice2, _lbItems);
         break;
     case OUTPUT_VALUE:
-        _displayOutputValues(pDevice2, GetDlgItem(hDlg, IDC_ITEMS));
+        h.displayOutputValues(pDevice2, _lbItems);
         break;
     case FEATURE_BUTTON:
-        _displayFeatureButtons(pDevice2, GetDlgItem(hDlg, IDC_ITEMS));
+        h.displayFeatureButtons(pDevice2, _lbItems);
         break;
     case FEATURE_VALUE:
-        _displayFeatureValues(pDevice2, GetDlgItem(hDlg, IDC_ITEMS));
+        h.displayFeatureValues(pDevice2, _lbItems);
         break;
     }
 
     PostMessageA(hDlg, WM_COMMAND, IDC_ITEMS + (LBN_SELCHANGE << 16), LPARAM(GetDlgItem(hDlg, IDC_ITEMS)));
 
-    return TRUE;
+    return FALSE;
 }
 
 INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
@@ -702,101 +422,97 @@ INT_PTR MainDialog::dlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
         return FALSE;
     case WM_UNREGISTER_HANDLE:
         UnregisterDeviceNotification(HDEVNOTIFY(lParam));
-        return TRUE;
+        return FALSE;
+    case WM_DESTROY:
+        delete _writeDlg;
+        delete _readDlg;
+        return FALSE;
     }
     return FALSE;
 }
 
 INT_PTR MainDialog::_itemsProc(HWND hDlg, WPARAM wParam)
 {
-    switch(HIWORD(wParam))
+    if (HIWORD(wParam) != LBN_SELCHANGE)
+        return FALSE;
+
+    INT iItemType = 0;
+    INT iIndex = INT(_cbItemType.sendMsgA(CB_GETCURSEL, 0, 0));
+
+    if (iIndex != -1)
     {
-    case LBN_SELCHANGE:
+        iItemType = INT(_cbItemType.sendMsgA(CB_GETITEMDATA, iIndex, 0));
+    }
+
+    iIndex = INT(_lbItems.sendMsgA(LB_GETCURSEL, 0, 0));
+
+    switch (iItemType)
     {
-        INT iItemType = 0;
-        INT iIndex = INT(SendDlgItemMessageA(hDlg, IDC_TYPE, CB_GETCURSEL, 0, 0));
+    case INPUT_BUTTON:
+    case OUTPUT_BUTTON:
+    case FEATURE_BUTTON:
+    {
+        HIDP_BUTTON_CAPS *pButtonCaps = nullptr;
 
         if (iIndex != -1)
         {
-            iItemType = INT(SendDlgItemMessageA(hDlg, IDC_TYPE, CB_GETITEMDATA, iIndex, 0));
+            LRESULT ret = _lbItems.sendMsgA(LB_GETITEMDATA, iIndex, 0);
+            pButtonCaps = PHIDP_BUTTON_CAPS(ret);
         }
 
-        iIndex = INT(SendDlgItemMessageA(hDlg, IDC_ITEMS, LB_GETCURSEL, 0, 0));
+        _lbAttr.sendMsgA(LB_RESETCONTENT, 0, 0);
 
-        switch (iItemType)
+        if (pButtonCaps != nullptr)
+            HidInfo().displayButtonAttributes(pButtonCaps, GetDlgItem(hDlg, IDC_ATTRIBUTES));
+    }
+        break;
+    case INPUT_VALUE:
+    case OUTPUT_VALUE:
+    case FEATURE_VALUE:
+    {
+        PHIDP_VALUE_CAPS pValueCaps = NULL;
+
+        if (iIndex != -1)
         {
-        case INPUT_BUTTON:
-        case OUTPUT_BUTTON:
-        case FEATURE_BUTTON:
-        {
-            HIDP_BUTTON_CAPS *pButtonCaps = nullptr;
-
-            if (iIndex != -1)
-            {
-                LRESULT ret = SendDlgItemMessageA(hDlg, IDC_ITEMS, LB_GETITEMDATA, iIndex, 0);
-                pButtonCaps = PHIDP_BUTTON_CAPS(ret);
-            }
-
-            SendDlgItemMessageA(hDlg, IDC_ATTRIBUTES, LB_RESETCONTENT, 0, 0);
-
-            if (pButtonCaps != nullptr)
-                _displayButtonAttributes(pButtonCaps, GetDlgItem(hDlg, IDC_ATTRIBUTES));
+            pValueCaps = PHIDP_VALUE_CAPS(_lbItems.sendMsgA(LB_GETITEMDATA, iIndex, 0));
         }
-            break;
-        case INPUT_VALUE:
-        case OUTPUT_VALUE:
-        case FEATURE_VALUE:
-        {
-            PHIDP_VALUE_CAPS pValueCaps = NULL;
 
-            if (iIndex != -1)
-            {
-                pValueCaps = PHIDP_VALUE_CAPS(SendDlgItemMessageA(
-                            hDlg, IDC_ITEMS, LB_GETITEMDATA, iIndex, 0));
-            }
+        _lbAttr.sendMsgA(LB_RESETCONTENT, 0, 0);
 
-            SendDlgItemMessageA(hDlg, IDC_ATTRIBUTES, LB_RESETCONTENT, 0, 0);
-
-            if (pValueCaps != NULL)
-            {
-                _displayValueAttributes(pValueCaps, GetDlgItem(hDlg, IDC_ATTRIBUTES));
-            }
-        }
-            return TRUE;
-        case HID_CAPS:
-            return _caps(hDlg);
-        case DEVICE_ATTRIBUTES:
-            return _devAttr(hDlg);
-        }
+        if (pValueCaps != NULL)
+            HidInfo().displayValueAttributes(pValueCaps, _lbAttr);
     }
         return TRUE;
+    case HID_CAPS:
+        return _caps();
+    case DEVICE_ATTRIBUTES:
+        return _devAttr();
     }
-
     return TRUE;
 }
 
-INT_PTR MainDialog::_caps(HWND hDlg)
+INT_PTR MainDialog::_caps()
 {
-    HidDevice *pDevice2 = _getCurrentDevice(hDlg);
+    HidDevice *pDevice2 = _getCurrentDevice();
     HID_DEVICE *pDevice = pDevice2->getp();
 
     if (pDevice != nullptr)
     {
-        _displayDeviceCaps(&pDevice->Caps, GetDlgItem(hDlg, IDC_ATTRIBUTES));
+        HidInfo().displayDeviceCaps(&pDevice->Caps, _lbAttr);
     }
 
     return TRUE;
 }
 
-INT_PTR MainDialog::_devAttr(HWND hDlg)
+INT_PTR MainDialog::_devAttr()
 {
-    HidDevice *pDevice2 = _getCurrentDevice(hDlg);
+    HidDevice *pDevice2 = _getCurrentDevice();
     HID_DEVICE *pDevice = pDevice2->getp();
 
     if (pDevice != NULL)
     {
-        SendDlgItemMessageA(hDlg, IDC_ATTRIBUTES, LB_RESETCONTENT, 0, 0);
-        _displayDeviceAttributes(&(pDevice->Attributes), GetDlgItem(hDlg, IDC_ATTRIBUTES));
+        _lbAttr.sendMsgA(LB_RESETCONTENT, 0, 0);
+        HidInfo().displayDeviceAttributes(&pDevice->Attributes, _lbAttr);
     }
 
     return TRUE;
@@ -806,110 +522,125 @@ INT_PTR MainDialog::_devArrival(HWND hDlg, LPARAM lParam)
 {
     PDEV_BROADCAST_HDR broadcastHdr = PDEV_BROADCAST_HDR(lParam);
 
-    if (DBT_DEVTYP_DEVICEINTERFACE == broadcastHdr->dbch_devicetype)
+    if (DBT_DEVTYP_DEVICEINTERFACE != broadcastHdr->dbch_devicetype)
+        return TRUE;
+
+    DEV_BROADCAST_DEVICEINTERFACE_A *pbroadcastInterface;
+    DEVICE_LIST_NODE *currNode;
+    BOOLEAN phyDevListChanged = FALSE;
+    pbroadcastInterface = PDEV_BROADCAST_DEVICEINTERFACE_A(lParam);
+#if 0
+    currNode = reinterpret_cast<DEVICE_LIST_NODE *>(g_physDevList.head());
+
+    while (currNode != PDEVICE_LIST_NODE(g_physDevList.get()))
     {
-        DEV_BROADCAST_DEVICEINTERFACE_A *pbroadcastInterface;
-        DEVICE_LIST_NODE *currNode, *nextNode;
-        BOOLEAN phyDevListChanged = FALSE;
-        pbroadcastInterface = PDEV_BROADCAST_DEVICEINTERFACE_A(lParam);
-        currNode = reinterpret_cast<DEVICE_LIST_NODE *>(g_physDevList.head());
+        // save the next node pointer first as we may remove
+        //  the current node.
+        nextNode = PDEVICE_LIST_NODE(PLIST_ENTRY(currNode)->Flink);
 
-        while (currNode != PDEVICE_LIST_NODE(g_physDevList.get()))
+        if (currNode->HidDeviceInfo.DevicePath != NULL &&
+            strcmp(currNode->HidDeviceInfo.DevicePath,
+                   pbroadcastInterface->dbcc_name) == 0)
         {
-            // save the next node pointer first as we may remove
-            //  the current node.
-            nextNode = PDEVICE_LIST_NODE(PLIST_ENTRY(currNode)->Flink);
-
-            if (currNode->HidDeviceInfo.DevicePath != NULL &&
-                strcmp(currNode->HidDeviceInfo.DevicePath,
-                       pbroadcastInterface->dbcc_name) == 0)
+            if (currNode->DeviceOpened == FALSE)
             {
-                if (currNode->DeviceOpened == FALSE)
-                {
-                    // Remove the node from the list
-                    g_physDevList.remove(PLIST_ENTRY(currNode));
+                // Remove the node from the list
+                g_physDevList.remove(PLIST_ENTRY(currNode));
 
-                    // Let it free the memory of the device path string
-                    CloseHidDevice(&currNode->HidDeviceInfo);
+                // Let it free the memory of the device path string
+                CloseHidDevice(&currNode->HidDeviceInfo);
 
-                    // Free the memory of the node structure
-                    free(currNode);
-
-                    phyDevListChanged = TRUE;
-                }
-                else
-                {
-                    return TRUE;
-                }
-            }
-
-            // Move to the next node
-            currNode = nextNode;
-        }
-
-        // In this structure, we are given the name of the device
-        //    to open.  So all that needs to be done is open
-        //    a new hid device with the string
-        DEVICE_LIST_NODE *listNode;
-        listNode = PDEVICE_LIST_NODE(malloc(sizeof(DEVICE_LIST_NODE)));
-
-        if (NULL == listNode)
-        {
-            MessageBoxA(hDlg, "Error -- Couldn't allocate memory for new device list node",
-                        HCLIENT_ERROR, MB_ICONEXCLAMATION | MB_OK | MB_TASKMODAL);
-        }
-        else
-        {
-            BOOLEAN res;
-            res = listNode->hidDevice.open(pbroadcastInterface->dbcc_name,
-                                           FALSE, FALSE, FALSE, FALSE);
-
-            listNode->HidDeviceInfo = listNode->hidDevice.get();
-
-            if (!res)
-            {
-                // Save the device path so it can be still listed.
-                INT iDevicePathSize = INT(strlen(pbroadcastInterface->dbcc_name)) + 1;
-                listNode->HidDeviceInfo.DevicePath = PCHAR(malloc(iDevicePathSize));
-
-                if (NULL == listNode -> HidDeviceInfo.DevicePath)
-                {
-                    MessageBoxA(hDlg,
-                       "Error -- Couldn't allocate memory for new device path",
-                       HCLIENT_ERROR, MB_ICONEXCLAMATION | MB_OK | MB_TASKMODAL);
-
-                    free(listNode);
-                    listNode = NULL;
-                }
-                else
-                {
-                    StringCbCopyA(listNode->HidDeviceInfo.DevicePath, iDevicePathSize, pbroadcastInterface->dbcc_name);
-                }
-            }
-
-            if (listNode != NULL)
-            {
-                listNode->DeviceOpened = (INVALID_HANDLE_VALUE == listNode->HidDeviceInfo.HidDevice) ? FALSE : TRUE;
-
-                if (listNode->DeviceOpened)
-                {
-                    if (!_registerHidDevice(hDlg, listNode))
-                    {
-                        MessageBoxA(hDlg, "Error -- Couldn't register handle notification",
-                                HCLIENT_ERROR, MB_ICONEXCLAMATION | MB_OK | MB_TASKMODAL);
-                    }
-                }
-
-                g_physDevList.insertTail(PLIST_ENTRY(listNode));
+                // Free the memory of the node structure
+                delete currNode;
                 phyDevListChanged = TRUE;
             }
+            else
+            {
+                return TRUE;
+            }
         }
 
-        if (phyDevListChanged)
+        // Move to the next node
+        currNode = nextNode;
+    }
+#endif
+
+    CListIterator it(&g_physDevList);
+
+    while (it.hasNext())
+    {
+        currNode = PDEVICE_LIST_NODE(it.next());
+
+        if (currNode->HidDeviceInfo.DevicePath != NULL &&
+                strcmp(currNode->HidDeviceInfo.DevicePath,
+                       pbroadcastInterface->dbcc_name) == 0)
         {
-            _loadDevices(GetDlgItem(hDlg, IDC_DEVICES));
-            PostMessageA(hDlg, WM_COMMAND, IDC_DEVICES + (CBN_SELCHANGE << 16), LPARAM(GetDlgItem(hDlg, IDC_DEVICES)));
+            //g_physDevList.remove
         }
+    }
+
+    // In this structure, we are given the name of the device
+    //    to open.  So all that needs to be done is open
+    //    a new hid device with the string
+    DEVICE_LIST_NODE *listNode;
+    listNode = PDEVICE_LIST_NODE(malloc(sizeof(DEVICE_LIST_NODE)));
+
+    if (NULL == listNode)
+    {
+        MessageBoxA(hDlg, "Error -- Couldn't allocate memory for new device list node",
+                    HCLIENT_ERROR, MB_ICONEXCLAMATION | MB_OK | MB_TASKMODAL);
+    }
+    else
+    {
+        BOOLEAN res;
+        res = listNode->hidDevice->open(pbroadcastInterface->dbcc_name,
+                                       FALSE, FALSE, FALSE, FALSE);
+
+        listNode->HidDeviceInfo = listNode->hidDevice->get();
+
+        if (!res)
+        {
+            // Save the device path so it can be still listed.
+            INT iDevicePathSize = INT(strlen(pbroadcastInterface->dbcc_name)) + 1;
+            listNode->HidDeviceInfo.DevicePath = PCHAR(malloc(iDevicePathSize));
+
+            if (NULL == listNode -> HidDeviceInfo.DevicePath)
+            {
+                MessageBoxA(hDlg,
+                   "Error -- Couldn't allocate memory for new device path",
+                   HCLIENT_ERROR, MB_ICONEXCLAMATION | MB_OK | MB_TASKMODAL);
+
+                delete listNode;
+                listNode = NULL;
+            }
+            else
+            {
+                StringCbCopyA(listNode->HidDeviceInfo.DevicePath, iDevicePathSize, pbroadcastInterface->dbcc_name);
+            }
+        }
+
+        if (listNode != NULL)
+        {
+            listNode->DeviceOpened = (INVALID_HANDLE_VALUE == listNode->HidDeviceInfo.HidDevice) ? FALSE : TRUE;
+
+            if (listNode->DeviceOpened)
+            {
+                if (!_registerHidDevice(hDlg, listNode))
+                {
+                    MessageBoxA(hDlg, "Error -- Couldn't register handle notification",
+                            HCLIENT_ERROR, MB_ICONEXCLAMATION | MB_OK | MB_TASKMODAL);
+                }
+            }
+
+            g_physDevList.insertTail(PLIST_ENTRY(listNode));
+            phyDevListChanged = TRUE;
+        }
+    }
+
+    if (phyDevListChanged)
+    {
+        _loadDevices();
+        PostMessageA(hDlg, WM_COMMAND, IDC_DEVICES + (CBN_SELCHANGE << 16), LPARAM(GetDlgItem(hDlg, IDC_DEVICES)));
     }
 
     return TRUE;
@@ -939,7 +670,7 @@ INT_PTR MainDialog::_devQuery(LPARAM lParam)
         {
             if (currNode->DeviceOpened)
             {
-                CloseHidDevice(&(currNode->HidDeviceInfo));
+                CloseHidDevice(&currNode->HidDeviceInfo);
                 currNode->DeviceOpened = FALSE;
             }
 
@@ -949,11 +680,17 @@ INT_PTR MainDialog::_devQuery(LPARAM lParam)
         currNode = PDEVICE_LIST_NODE(PLIST_ENTRY(currNode)->Flink);
     }
 
-    return TRUE;
+    return FALSE;
 }
 
 INT_PTR MainDialog::_init(HWND hDlg)
 {
+    _cbDevices.import(hDlg, IDC_DEVICES);
+    _cbItemType.import(hDlg, IDC_TYPE);
+    _lbItems.import(hDlg, IDC_ITEMS);
+    _lbAttr.import(hDlg, IDC_ATTRIBUTES);
+    _readDlg = new ReadDialog(_hInstance);
+    _writeDlg = new WriteDialog(_hInstance);
     g_physDevList.init();
     HidFinder hidFinder;
 
@@ -962,8 +699,9 @@ INT_PTR MainDialog::_init(HWND hDlg)
     {
         HidDevice *dev = hidFinder.next();
         DEVICE_LIST_NODE *listNode = new DEVICE_LIST_NODE;
+        listNode->hidDevice = dev;
         listNode->HidDeviceInfo = dev->get();
-        listNode->DeviceOpened = dev->getp()->HidDevice ? FALSE : TRUE;
+        listNode->DeviceOpened = dev->handle() ? FALSE : TRUE;
 
         if (listNode->DeviceOpened)
         {
@@ -1006,15 +744,15 @@ INT_PTR MainDialog::_init(HWND hDlg)
     }
 
     // Update the device list box...
-    _loadDevices(GetDlgItem(hDlg, IDC_DEVICES));
-    _loadItemTypes(GetDlgItem(hDlg, IDC_TYPE));
+    _loadDevices();
+    _loadItemTypes();
 
     // Post a message that the device changed so the appropriate
     //   data for the first device in the system can be displayed
     PostMessageA(hDlg, WM_COMMAND, IDC_DEVICES + (CBN_SELCHANGE<<16),
                 LPARAM(GetDlgItem(hDlg, IDC_DEVICES)));
 
-    return TRUE;
+    return FALSE;
 }
 
 INT_PTR MainDialog::_devRemove(HWND hDlg, LPARAM lParam)
@@ -1043,8 +781,8 @@ INT_PTR MainDialog::_devRemove(HWND hDlg, LPARAM lParam)
                 CloseHidDevice(&currNode->HidDeviceInfo);
 
             g_physDevList.remove(PLIST_ENTRY(currNode));
-            free(currNode);
-            _loadDevices(GetDlgItem(hDlg, IDC_DEVICES));
+            delete currNode;
+            _loadDevices();
 
             PostMessageA(hDlg, WM_COMMAND, IDC_DEVICES + (CBN_SELCHANGE << 16),
                        LPARAM(GetDlgItem(hDlg, IDC_DEVICES)));
@@ -1056,6 +794,6 @@ INT_PTR MainDialog::_devRemove(HWND hDlg, LPARAM lParam)
         currNode = PDEVICE_LIST_NODE(PLIST_ENTRY(currNode)->Flink);
     }
 
-    return TRUE;
+    return FALSE;
 }
 
