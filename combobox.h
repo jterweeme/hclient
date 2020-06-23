@@ -1,19 +1,14 @@
 #ifndef COMBOBOX_H
 #define COMBOBOX_H
 
-#include <windows.h>
+#include "element.h"
 #include <strsafe.h>
 
-class Combobox
+class Combobox : public Element
 {
 private:
-    HWND _hwnd;
-    HWND _parent;
-    int _id;
 public:
     Combobox();
-    void import(HWND parent, int id);
-    LRESULT sendMsgA(UINT msg, WPARAM wp, LPARAM lp) const;
     LRESULT addStr(STRSAFE_LPCSTR pszFormat, ...);
 };
 

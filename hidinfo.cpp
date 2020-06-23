@@ -1,21 +1,60 @@
 #include "hidinfo.h"
 #include "hclient.h"
 
-LRESULT HidInfo::addStrToCtrl(HWND hCtrl, STRSAFE_LPCSTR pszFormat, ...)
-{
-    CHAR buf[SMALL_BUFF];
-    va_list vl;
-    va_start(vl, pszFormat);
-    StringCbVPrintfA(buf, SMALL_BUFF, pszFormat, vl);
-    va_end(vl);
-    return SendMessageA(hCtrl, LB_ADDSTRING, 0, LPARAM(buf));
-}
-
 void HidInfo::displayDeviceAttributes(HIDD_ATTRIBUTES *pAttrib, Listbox &lb)
 {
     lb.addStr("Vendor ID: 0x%x", pAttrib->VendorID);
     lb.addStr("Product ID: 0x%x", pAttrib->ProductID);
     lb.addStr("Version Number 0x%x", pAttrib->VersionNumber);
+}
+
+std::string HidInfo::report(HID_DATA *data)
+{
+    const int bufsize = 200;
+    char buf[bufsize];
+
+    if (data->IsButtonData)
+    {
+        if (StringCbPrintfA(buf, bufsize, "Usage Page: 0x%x, Usages: ",
+                            data->UsagePage) < 0)
+        {
+            for (UINT j = 0; j < bufsize; j++)
+                buf[j] = '\0';
+
+            throw "Error";
+        }
+
+        UINT iRemainingBuffer = 0;
+        UINT iStringLength = UINT(strlen(buf));
+        char *pszWalk = buf + iStringLength;
+
+        if (iStringLength < bufsize)
+            iRemainingBuffer = bufsize - iStringLength;
+
+        ULONG i;
+        PUSAGE pUsage;
+        for (i = 0, pUsage = data->ButtonData.Usages;
+             i < data->ButtonData.MaxUsageLength;
+             i++, pUsage++)
+        {
+            if (*pUsage == 0)
+                break; // A usage of zero is a non button.
+
+            if (StringCbPrintfA(pszWalk, iRemainingBuffer, " 0x%x", *pUsage) < 0)
+                throw "Error";
+
+            iRemainingBuffer -= UINT(strlen(pszWalk));
+            pszWalk += strlen(pszWalk);
+        }
+    }
+    else
+    {
+        StringCbPrintfA(buf, bufsize, "Usage Page: 0x%x, Usage: 0x%x, Scaled: %d Value: %d",
+                    data->UsagePage, data->ValueData.Usage, data->ValueData.ScaledValue,
+                    data->ValueData.Value);
+    }
+
+    return std::string(buf);
 }
 
 void HidInfo::displayValueAttributes(HIDP_VALUE_CAPS *pValue, Listbox &lb)
@@ -118,25 +157,24 @@ void HidInfo::displayInputButtons(HidDevice *pDevice, Listbox &lb)
     lb.sendMsgA(LB_SETCURSEL, 0, 0);
 }
 
-void HidInfo::displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, HWND hControl)
+void HidInfo::displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, Listbox &lb)
 {
     HidButtonCaps caps(*pButton);
     CHAR szTempBuff[SMALL_BUFF];
-    addStrToCtrl(hControl, "Report ID: 0x%x", pButton->ReportID);
-    addStrToCtrl(hControl, "Usage Page: 0x%x", pButton->UsagePage);
-    addStrToCtrl(hControl, "Alias: %s", pButton->IsAlias ? "TRUE" : "FALSE");
-    addStrToCtrl(hControl, "Link Collection: %hu", pButton->LinkCollection);
-    addStrToCtrl(hControl, "Link Usage Page: 0x%x", pButton->LinkUsagePage);
-    addStrToCtrl(hControl, "Link Usage: 0x%x", pButton->LinkUsage);
+    lb.addStr("Report ID: 0x%x", pButton->ReportID);
+    lb.addStr("Usage Page: 0x%x", pButton->UsagePage);
+    lb.addStr("Alias: %s", pButton->IsAlias ? "TRUE" : "FALSE");
+    lb.addStr("Link Collection: %hu", pButton->LinkCollection);
+    lb.addStr("Link Usage Page: 0x%x", pButton->LinkUsagePage);
+    lb.addStr("Link Usage: 0x%x", pButton->LinkUsage);
 
     if (caps.isRange())
     {
-        addStrToCtrl(hControl, "Usage Min: 0x%x, Usage Max: 0x%x",
-                     caps.usageMin(), caps.usageMax());
+        lb.addStr("Usage Min: 0x%x, Usage Max: 0x%x", caps.usageMin(), caps.usageMax());
     }
     else
     {
-        addStrToCtrl(hControl, "Usage: 0x%x", pButton->NotRange.Usage);
+        lb.addStr("Usage: 0x%x", pButton->NotRange.Usage);
     }
 
     if (pButton->IsRange)
@@ -150,7 +188,7 @@ void HidInfo::displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, HWND hControl)
          StringCbPrintfA(szTempBuff, SMALL_BUFF, "DataIndex: 0x%x", pButton->NotRange.DataIndex);
     }
 
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
+    lb.addStr(szTempBuff);
 
     if (pButton->IsStringRange)
     {
@@ -159,10 +197,11 @@ void HidInfo::displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, HWND hControl)
     }
     else
     {
-        StringCbPrintfA(szTempBuff, SMALL_BUFF, "String Index: 0x%x", pButton->NotRange.StringIndex);
+        StringCbPrintfA(szTempBuff, SMALL_BUFF, "String Index: 0x%x",
+                        pButton->NotRange.StringIndex);
     }
 
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
+    lb.addStr(szTempBuff);
 
     if (pButton->IsDesignatorRange)
     {
@@ -176,12 +215,9 @@ void HidInfo::displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, HWND hControl)
         StringCbPrintfA(szTempBuff, SMALL_BUFF, "Designator Index: 0x%x",
                        pButton->NotRange.DesignatorIndex);
     }
-    SendMessageA(hControl, LB_ADDSTRING, 0, LPARAM(szTempBuff));
 
-    if (pButton->IsAbsolute)
-        addStrToCtrl(hControl, "Absolute: Yes");
-    else
-        addStrToCtrl(hControl, "Absolute: No");
+    lb.addStr(szTempBuff);
+    lb.addStr(pButton->IsAbsolute ? "Absolute: Yes" : "Absolute: No");
 }
 
 void HidInfo::displayInputValues(HidDevice *pDevice, Listbox &lb)

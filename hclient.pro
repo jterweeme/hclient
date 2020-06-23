@@ -1,6 +1,8 @@
 TEMPLATE = app
 
-SOURCES += combobox.cpp\
+SOURCES += button.cpp\
+    combobox.cpp\
+    element.cpp\
     hid.cpp\
     hidfinder.cpp\
     hidinfo.cpp\
@@ -9,9 +11,12 @@ SOURCES += combobox.cpp\
     main.cpp\
     maindlg.cpp\
     readdlg.cpp\
+    toolbox.cpp\
     writedlg.cpp
 
-HEADERS += combobox.h\
+HEADERS += button.h\
+    combobox.h\
+    element.h\
     hclient.h\
     hid.h\
     hidfinder.h\
@@ -21,6 +26,7 @@ HEADERS += combobox.h\
     maindlg.h\
     readdlg.h\
     resource.h\
+    toolbox.h\
     writedlg.h
 
 RC_FILE += hclient.rc

@@ -26,6 +26,7 @@ std::string PnPFinder::next()
     SetupDiGetDeviceInterfaceDetailA(_hwDevInfo, &_devIfaceData, NULL, 0, &requiredLength, 0);
     DWORD predictedLength = requiredLength;
     SP_DEVICE_INTERFACE_DETAIL_DATA_A *devIfaceDetail;
+    //devIfaceDetail = new SP_DEVICE_INTERFACE_DETAIL_DATA_A[requiredLength]
     devIfaceDetail = PSP_DEVICE_INTERFACE_DETAIL_DATA_A(malloc(requiredLength));
     devIfaceDetail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_A);
     ZeroMemory(devIfaceDetail->DevicePath, sizeof(devIfaceDetail->DevicePath));
