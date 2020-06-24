@@ -19,7 +19,6 @@ struct DEVICE_LIST_NODE
 {
     LIST_ENTRY Hdr;
     HDEVNOTIFY NotificationHandle;
-    HID_DEVICE HidDeviceInfo;
     HidDevice *hidDevice;
     BOOL DeviceOpened;
 };
@@ -28,8 +27,10 @@ class MainDialog
 {
 private:
     static constexpr INT INPUT_BUTTON = 1, INPUT_VALUE = 2, OUTPUT_BUTTON = 3,
-        OUTPUT_VALUE = 4, FEATURE_BUTTON = 5, FEATURE_VALUE = 6, HID_CAPS = 7;
+        OUTPUT_VALUE = 4, FEATURE_BUTTON = 5, FEATURE_VALUE = 6, HID_CAPS = 7,
+        DEVICE_ATTRIBUTES = 8;
 
+    static constexpr UINT WM_UNREGISTER_HANDLE = WM_USER + 1;
     HWND _hDlg;
     static MainDialog *_instance;
     HINSTANCE _hInstance;

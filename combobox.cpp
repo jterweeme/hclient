@@ -15,3 +15,12 @@ LRESULT Combobox::addStr(STRSAFE_LPCSTR pszFormat, ...)
     return sendMsgA(CB_ADDSTRING, 0, LPARAM(buf));
 }
 
+LRESULT Combobox::setItemDataA(INT index, LPARAM value)
+{
+    return sendMsgA(CB_SETITEMDATA, index, value);
+}
+
+LRESULT Combobox::reset()
+{
+    return sendMsgA(CB_RESETCONTENT, 0, 0);
+}

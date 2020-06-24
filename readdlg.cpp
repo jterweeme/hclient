@@ -77,9 +77,10 @@ DWORD WINAPI ReadDialog::AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
         if (!Context->TerminateThread)
         {
             numReadsDone++;
-
+#if 0
             UnpackReport(tmp->InputReportBuffer, tmp->Caps.InputReportByteLength,
                      HidP_Input, tmp->InputData, tmp->InputDataLength, tmp->Ppd);
+#endif
 
             if (Context->DisplayEvent != NULL)
             {
@@ -89,6 +90,7 @@ DWORD WINAPI ReadDialog::AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
             else if (Context->DisplayWindow != NULL)
             {
                 HID_DEVICE *pDevice = tmp;
+#if 0
                 HID_DATA *pData = pDevice->InputData;
 
                 SendMessageA(GetDlgItem(Context->DisplayWindow, IDC_CALLOUTPUT),
@@ -104,6 +106,7 @@ DWORD WINAPI ReadDialog::AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
                     lb.addStr(foo.c_str());
                     pData++;
                 }
+#endif
             }
         }
     } while (readResult && !Context->TerminateThread &&
@@ -130,6 +133,8 @@ INT_PTR ReadDialog::_initDialog(HWND hDlg)
     if (readContext.DisplayEvent == NULL)
         EndDialog(hDlg, 0);
 
+    std::cout << _dev->devicePath() << "a\n";
+    std::cout.flush();
     _doSyncReads = _syncDevice2.open(_dev->devicePath(), TRUE, FALSE, FALSE, FALSE);
 
     if (!_doSyncReads)

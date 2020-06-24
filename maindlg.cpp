@@ -10,7 +10,6 @@
 
 typedef DEVICE_LIST_NODE *PDEVICE_LIST_NODE;
 
-#define DEVICE_ATTRIBUTES 8
 #define MAX_WRITE_ELEMENTS 100
 
 MainDialog::MainDialog(HINSTANCE hInstance) : _hInstance(hInstance)
@@ -48,9 +47,7 @@ HidDevice *MainDialog::_getCurrentDevice() const
         return nullptr;
 
     LRESULT lresult = _cbDevices.sendMsgA(CB_GETITEMDATA, i, 0);
-    HID_DEVICE *dev = reinterpret_cast<HID_DEVICE *>(lresult);
-    HidDevice *ret = new HidDevice;
-    ret->set(*dev);
+    HidDevice *ret = reinterpret_cast<HidDevice *>(lresult);
     return ret;
 }
 
@@ -97,11 +94,6 @@ BOOL MainDialog::_registerHidDevice(HWND WindowHandle, DEVICE_LIST_NODE *DeviceN
 VOID MainDialog::DestroyDeviceListCallback(LIST_ENTRY *ListNode)
 {
     PDEVICE_LIST_NODE deviceNode = PDEVICE_LIST_NODE(ListNode);
-
-    // The callback function needs to do the following steps...
-    //   1) Close the HidDevice
-    //   2) Unregister device notification (if registered)
-    //   3) Free the allocated memory block
     deviceNode->hidDevice->close();
 
     if (deviceNode->NotificationHandle != NULL)
@@ -114,7 +106,7 @@ void MainDialog::_loadDevices()
 {
     CHAR szTempBuff[SMALL_BUFF];
     INT iIndex;
-    _cbDevices.sendMsgA(CB_RESETCONTENT, 0, 0);
+    _cbDevices.reset();
     CListIterator it(&g_physDevList);
 
     for (INT i = 0; it.hasNext(); i++)
@@ -123,10 +115,11 @@ void MainDialog::_loadDevices()
 
         if (currNode->hidDevice->handle() != INVALID_HANDLE_VALUE)
         {
-            USHORT vid = currNode->HidDeviceInfo.Attributes.VendorID;
-            USHORT pid = currNode->HidDeviceInfo.Attributes.ProductID;
-            USHORT usagePage = currNode->HidDeviceInfo.Caps.UsagePage;
-            USHORT usage = currNode->HidDeviceInfo.Caps.Usage;
+            const USHORT vid = currNode->hidDevice->vendorId();
+            const USHORT pid = currNode->hidDevice->productId();
+            const HIDP_CAPS *caps = currNode->hidDevice->caps();
+            USHORT usagePage = caps->UsagePage;
+            USHORT usage = caps->Usage;
 
             StringCbPrintfA(szTempBuff, SMALL_BUFF,
                     "Device #%d: VID: 0x%04X  PID: 0x%04X  UsagePage: 0x%X  Usage: 0x%X",
@@ -134,16 +127,15 @@ void MainDialog::_loadDevices()
         }
         else
         {
-            StringCbPrintfA(szTempBuff, SMALL_BUFF, "*Device #%d: %s", i,
-                            currNode->HidDeviceInfo.DevicePath != NULL ?
-                            currNode->HidDeviceInfo.DevicePath : "");
+            StringCbPrintfA(szTempBuff, SMALL_BUFF, "*Device #%d: %s", i, currNode->hidDevice->devicePath());
         }
 
         iIndex = INT(_cbDevices.addStr(szTempBuff));
 
         if (iIndex != CB_ERR && INVALID_HANDLE_VALUE != currNode->hidDevice->handle())
         {
-            _cbDevices.sendMsgA(CB_SETITEMDATA, iIndex, LPARAM(&currNode->HidDeviceInfo));
+            //save pointer in combobox
+            _cbDevices.setItemDataA(iIndex, LPARAM(currNode->hidDevice));
         }
     }
 
@@ -154,21 +146,21 @@ void MainDialog::_loadItemTypes()
 {
     INT iIndex;
     iIndex = INT(_cbItemType.addStr("INPUT BUTTON"));
-    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, INPUT_BUTTON);
+    _cbItemType.setItemDataA(iIndex, INPUT_BUTTON);
     iIndex = INT(_cbItemType.addStr("INPUT VALUE"));
-    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, INPUT_VALUE);
+    _cbItemType.setItemDataA(iIndex, INPUT_VALUE);
     iIndex = INT(_cbItemType.addStr("OUTPUT BUTTON"));
-    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, OUTPUT_BUTTON);
+    _cbItemType.setItemDataA(iIndex, OUTPUT_BUTTON);
     iIndex = INT(_cbItemType.addStr("OUTPUT VALUE"));
-    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, OUTPUT_VALUE);
+    _cbItemType.setItemDataA(iIndex, OUTPUT_VALUE);
     iIndex = INT(_cbItemType.addStr("FEATURE BUTTON"));
-    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, FEATURE_BUTTON);
+    _cbItemType.setItemDataA(iIndex, FEATURE_BUTTON);
     iIndex = INT(_cbItemType.addStr("FEATURE VALUE"));
-    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, FEATURE_VALUE);
+    _cbItemType.setItemDataA(iIndex, FEATURE_VALUE);
     iIndex = INT(_cbItemType.addStr("HID CAPS"));
-    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, HID_CAPS);
+    _cbItemType.setItemDataA(iIndex, HID_CAPS);
     iIndex = INT(_cbItemType.addStr("DEVICE ATTRIBUTES"));
-    _cbItemType.sendMsgA(CB_SETITEMDATA, iIndex, DEVICE_ATTRIBUTES);
+    _cbItemType.setItemDataA(iIndex, DEVICE_ATTRIBUTES);
     _cbItemType.sendMsgA(CB_SETCURSEL, 0, 0);
 }
 
@@ -282,8 +274,6 @@ ULONG MainDialog::_prepareDataFields(HID_DATA *pData, ULONG ulDataLength)
     return i;
 }
 
-static constexpr UINT WM_UNREGISTER_HANDLE = WM_USER + 1;
-
 INT_PTR MainDialog::_command(HWND hDlg, WPARAM wParam)
 {
     switch (LOWORD(wParam))
@@ -372,13 +362,13 @@ INT_PTR MainDialog::_devices(HWND hDlg, WPARAM wParam)
     EnableWindow(GetDlgItem(hDlg, IDC_EXTCALLS), pDevice2 != nullptr);
 
     EnableWindow(GetDlgItem(hDlg, IDC_READ), pDevice2 != nullptr &&
-                    pDevice2->getp()->Caps.InputReportByteLength);
+                    pDevice2->caps()->InputReportByteLength);
 
     EnableWindow(GetDlgItem(hDlg, IDC_WRITE), pDevice2 != nullptr &&
-                    pDevice2->getp()->Caps.OutputReportByteLength);
+                    pDevice2->caps()->OutputReportByteLength);
 
     EnableWindow(GetDlgItem(hDlg, IDC_FEATURES),
-                    pDevice2 != NULL && pDevice2->getp()->Caps.FeatureReportByteLength);
+                    pDevice2 != NULL && pDevice2->caps()->FeatureReportByteLength);
 
     PostMessageA(hDlg, WM_COMMAND, IDC_TYPE + (CBN_SELCHANGE<<16),
                  LPARAM(GetDlgItem(hDlg, IDC_TYPE)));
@@ -491,7 +481,7 @@ INT_PTR MainDialog::_itemsProc(WPARAM wParam)
             pButtonCaps = PHIDP_BUTTON_CAPS(ret);
         }
 
-        _lbAttr.sendMsgA(LB_RESETCONTENT, 0, 0);
+        _lbAttr.reset();
 
         if (pButtonCaps != nullptr)
         {
@@ -531,7 +521,7 @@ INT_PTR MainDialog::_caps()
 
     if (pDevice != nullptr)
     {
-        HidInfo().displayDeviceCaps(&pDevice->Caps, _lbAttr);
+        HidInfo().displayDeviceCaps(pDevice2->caps(), _lbAttr);
     }
 
     return TRUE;
@@ -540,12 +530,11 @@ INT_PTR MainDialog::_caps()
 INT_PTR MainDialog::_devAttr()
 {
     HidDevice *pDevice2 = _getCurrentDevice();
-    HID_DEVICE *pDevice = pDevice2->getp();
 
-    if (pDevice != NULL)
+    if (pDevice2 != nullptr)
     {
-        _lbAttr.sendMsgA(LB_RESETCONTENT, 0, 0);
-        HidInfo().displayDeviceAttributes(&pDevice->Attributes, _lbAttr);
+        _lbAttr.reset();
+        HidInfo().displayDeviceAttributes(pDevice2->attributes(), _lbAttr);
     }
 
     return TRUE;
@@ -555,7 +544,7 @@ INT_PTR MainDialog::_devArrival(HWND hDlg, LPARAM lParam)
 {
     PDEV_BROADCAST_HDR broadcastHdr = PDEV_BROADCAST_HDR(lParam);
 
-    if (DBT_DEVTYP_DEVICEINTERFACE != broadcastHdr->dbch_devicetype)
+    if (broadcastHdr->dbch_devicetype != DBT_DEVTYP_DEVICEINTERFACE)
         return TRUE;
 
     DEV_BROADCAST_DEVICEINTERFACE_A *pbroadcastInterface;
@@ -604,13 +593,14 @@ INT_PTR MainDialog::_devArrival(HWND hDlg, LPARAM lParam)
     {
         currNode = PDEVICE_LIST_NODE(it.next());
 
-        if (currNode->HidDeviceInfo.DevicePath != NULL &&
-                strcmp(currNode->HidDeviceInfo.DevicePath,
+        if (currNode->hidDevice->devicePath() != NULL &&
+                strcmp(currNode->hidDevice->devicePath(),
                        pbroadcastInterface->dbcc_name) == 0)
         {
             //g_physDevList.remove
         }
     }
+
 
     // In this structure, we are given the name of the device
     //    to open.  So all that needs to be done is open
@@ -628,15 +618,15 @@ INT_PTR MainDialog::_devArrival(HWND hDlg, LPARAM lParam)
         res = listNode->hidDevice->open(pbroadcastInterface->dbcc_name,
                                        FALSE, FALSE, FALSE, FALSE);
 
-        listNode->HidDeviceInfo = listNode->hidDevice->get();
+        //listNode->HidDeviceInfo = listNode->hidDevice->get();
 
         if (!res)
         {
             // Save the device path so it can be still listed.
             INT iDevicePathSize = INT(strlen(pbroadcastInterface->dbcc_name)) + 1;
-            listNode->HidDeviceInfo.DevicePath = new char[iDevicePathSize];
+            //listNode->HidDeviceInfo.DevicePath = new char[iDevicePathSize];
 
-            if (listNode->HidDeviceInfo.DevicePath == NULL)
+            if (listNode->hidDevice->devicePath() == NULL)
             {
                 MessageBoxA(hDlg,
                    "Error -- Couldn't allocate memory for new device path",
@@ -647,7 +637,7 @@ INT_PTR MainDialog::_devArrival(HWND hDlg, LPARAM lParam)
             }
             else
             {
-                StringCbCopyA(listNode->HidDeviceInfo.DevicePath, iDevicePathSize, pbroadcastInterface->dbcc_name);
+                //StringCbCopyA(listNode->HidDeviceInfo.DevicePath, iDevicePathSize, pbroadcastInterface->dbcc_name);
             }
         }
 
@@ -686,12 +676,7 @@ INT_PTR MainDialog::_devQuery(LPARAM lParam)
         return TRUE;
 
     PDEV_BROADCAST_HANDLE broadcastHandle = PDEV_BROADCAST_HANDLE(lParam);
-
-    // Get the handle to the notification registration
     HDEVNOTIFY notificationHandle = broadcastHandle->dbch_hdevnotify;
-
-    // Search the physical device list for the handle that
-    //  was removed...
     PDEVICE_LIST_NODE currNode;
     currNode = PDEVICE_LIST_NODE(g_physDevList.head());
 
@@ -733,7 +718,6 @@ INT_PTR MainDialog::_init(HWND hDlg)
         HidDevice *dev = hidFinder.next();
         DEVICE_LIST_NODE *listNode = new DEVICE_LIST_NODE;
         listNode->hidDevice = dev;
-        listNode->HidDeviceInfo = dev->get();
         listNode->DeviceOpened = dev->handle() ? FALSE : TRUE;
 
         if (listNode->DeviceOpened)

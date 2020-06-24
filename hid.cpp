@@ -10,22 +10,7 @@ HidDevice::HidDevice()
 
 HidDevice::~HidDevice()
 {
-
 }
-
-#if 1
-void HidDevice::set(HID_DEVICE dev)
-{
-    _dev = dev;
-}
-#endif
-
-#if 1
-HID_DEVICE HidDevice::get() const
-{
-    return _dev;
-}
-#endif
 
 HID_DEVICE *HidDevice::getp()
 {
@@ -34,7 +19,7 @@ HID_DEVICE *HidDevice::getp()
 
 LPCSTR HidDevice::devicePath() const
 {
-    return _dev.DevicePath;
+    return _path.c_str();
 }
 
 HANDLE HidDevice::handle() const
@@ -44,12 +29,42 @@ HANDLE HidDevice::handle() const
 
 HID_DATA *HidDevice::inputData() const
 {
-    return _dev.InputData;
+    return InputData;
 }
 
 ULONG HidDevice::inputDataLen() const
 {
-    return _dev.InputDataLength;
+    return InputDataLength;
+}
+
+const HIDD_ATTRIBUTES *HidDevice::attributes() const
+{
+    return &_Attributes;
+}
+
+USHORT HidDevice::vendorId() const
+{
+    return attributes()->VendorID;
+}
+
+USHORT HidDevice::productId() const
+{
+    return attributes()->ProductID;
+}
+
+const HIDP_CAPS *HidDevice::caps()
+{
+    return &_Caps;
+}
+
+const HIDP_BUTTON_CAPS *HidDevice::inputButtonCaps() const
+{
+    return InputButtonCaps;
+}
+
+const HIDP_VALUE_CAPS *HidDevice::inputValueCaps() const
+{
+    return InputValueCaps;
 }
 
 void HidDevice::close()
@@ -61,17 +76,16 @@ BOOLEAN HidDevice::read()
 {
     DWORD bytesRead;
 
-    if (!ReadFile(handle(), _dev.InputReportBuffer,
-                  _dev.Caps.InputReportByteLength, &bytesRead, NULL))
+    if (!ReadFile(handle(), InputReportBuffer,
+                  _Caps.InputReportByteLength, &bytesRead, NULL))
     {
         return FALSE;
     }
 
-    if (bytesRead != _dev.Caps.InputReportByteLength)
+    if (bytesRead != _Caps.InputReportByteLength)
         return FALSE;
 
-    return UnpackReport(_dev.InputReportBuffer, _dev.Caps.InputReportByteLength,
-                  HidP_Input, _dev.InputData, _dev.InputDataLength, _dev.Ppd);
+    return _UnpackReport();
 }
 
 BOOLEAN HidDevice::readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap)
@@ -79,8 +93,8 @@ BOOLEAN HidDevice::readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap)
     memset(overlap, 0, sizeof(OVERLAPPED));
     overlap->hEvent = completionEv;
     DWORD bytesRead;
-    BOOL readStatus = ReadFile(handle(), _dev.InputReportBuffer,
-                         _dev.Caps.InputReportByteLength, &bytesRead, overlap);
+    BOOL readStatus = ReadFile(handle(), InputReportBuffer,
+                         _Caps.InputReportByteLength, &bytesRead, overlap);
 
     if (!readStatus)
         return GetLastError() == ERROR_IO_PENDING;
@@ -106,10 +120,12 @@ Routine Description:
    A return value of TRUE indicates that all data values for the given report
       ID were set without error.
 --*/
-BOOLEAN HidDevice::PackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
-                   HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
-                   ULONG DataLength, PHIDP_PREPARSED_DATA Ppd)
+BOOLEAN HidDevice::PackReport(HID_DATA *Data, ULONG DataLength)
 {
+    char *ReportBuffer = _dev.OutputReportBuffer;
+    USHORT ReportBufferLength = _Caps.OutputReportByteLength;
+    HIDP_REPORT_TYPE ReportType = HidP_Output;
+    PHIDP_PREPARSED_DATA Ppd = _ppd;
     ULONG numUsages;
     ULONG CurrReportID;
     BOOLEAN result = FALSE;
@@ -163,28 +179,25 @@ BOOLEAN HidDevice::write()
             continue;
 
         DWORD bytesWritten;
-        PackReport(_dev.OutputReportBuffer, _dev.Caps.OutputReportByteLength,
-                   HidP_Output, pData, _dev.OutputDataLength - Index, _dev.Ppd);
+        PackReport(pData, _dev.OutputDataLength - Index);
 
         BOOLEAN WriteStatus = WriteFile(handle(), _dev.OutputReportBuffer,
-                      _dev.Caps.OutputReportByteLength, &bytesWritten, NULL);
+                      _Caps.OutputReportByteLength, &bytesWritten, NULL);
 
-        WriteStatus = WriteStatus && bytesWritten == _dev.Caps.OutputReportByteLength;
+        WriteStatus = WriteStatus && bytesWritten == _Caps.OutputReportByteLength;
         Status = Status && WriteStatus;
     }
     return Status;
 }
 
-/*++
-Routine Description:
-   Given ReportBuffer representing a report from a HID device where the first
-   byte of the buffer is the report ID for the report, extract all the HID_DATA
-   in the Data list from the given report.
---*/
-BOOLEAN UnpackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
-    HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
-    ULONG DataLength, PHIDP_PREPARSED_DATA Ppd)
+BOOLEAN HidDevice::_UnpackReport()
 {
+    char *ReportBuffer = InputReportBuffer;
+    USHORT ReportBufferLength = _Caps.InputReportByteLength;
+    HIDP_REPORT_TYPE ReportType = HidP_Input;
+    HID_DATA *Data = InputData;
+    ULONG DataLength = InputDataLength;
+    PHIDP_PREPARSED_DATA Ppd = _ppd;
     ULONG numUsages; // Number of usages returned from GetUsages.
     ULONG Index;
     ULONG nextUsage;
@@ -222,9 +235,8 @@ BOOLEAN UnpackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
         else
         {
             Data->Status = HidP_GetUsageValue(ReportType, Data->UsagePage, 0,
-                                            Data->ValueData.Usage,
-                                            &Data->ValueData.Value, Ppd,
-                                            ReportBuffer, ReportBufferLength);
+                             Data->ValueData.Usage, &Data->ValueData.Value, Ppd,
+                             ReportBuffer, ReportBufferLength);
 
             if (Data->Status != HIDP_STATUS_SUCCESS)
                 return result;
@@ -245,177 +257,143 @@ BOOLEAN UnpackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
     return result;
 }
 
-BOOLEAN HidDevice::_FillDeviceInfo()
+void HidDevice::_fillInputInfo()
 {
-    HID_DEVICE *HidDevice = &_dev;
-    USAGE usage;
-    UINT dataIdx;
-    ULONG newFeatureDataLength = 0;
-    ULONG tmpSum;
-    BOOLEAN bRet = FALSE;
-    HidDevice->InputReportBuffer = new char[HidDevice->Caps.InputReportByteLength];
-    HIDP_BUTTON_CAPS *buttonCaps = new HIDP_BUTTON_CAPS[HidDevice->Caps.NumberInputButtonCaps];
-    HidDevice->InputButtonCaps = buttonCaps;
+    InputReportBuffer = new char[_Caps.InputReportByteLength];
+    InputButtonCaps = new HIDP_BUTTON_CAPS[_Caps.NumberInputButtonCaps];
+    InputValueCaps = new HIDP_VALUE_CAPS[_Caps.NumberInputValueCaps];
 
-    if (HidDevice->InputButtonCaps == NULL)
-        return bRet;
-
-    HIDP_VALUE_CAPS *valueCaps = new HIDP_VALUE_CAPS[HidDevice->Caps.NumberInputValueCaps];
-    HidDevice->InputValueCaps = valueCaps;
-
-    if (valueCaps == NULL)
-        return bRet;
-
-    USHORT numCaps = HidDevice->Caps.NumberInputButtonCaps;
-
-    if (numCaps > 0)
+    if (_Caps.NumberInputButtonCaps > 0)
     {
-        if (HidP_GetButtonCaps(HidP_Input, HidDevice->InputButtonCaps,
-                               &numCaps, HidDevice->Ppd) != HIDP_STATUS_SUCCESS)
+        if (HidP_GetButtonCaps(HidP_Input, InputButtonCaps,
+                     &_Caps.NumberInputButtonCaps, _ppd) != HIDP_STATUS_SUCCESS)
         {
-            return bRet;
+            throw "GetButtonCaps";
         }
     }
 
-    numCaps = HidDevice->Caps.NumberInputValueCaps;
-
-    if (numCaps > 0)
-        if (HidP_GetValueCaps(HidP_Input, valueCaps, &numCaps, HidDevice->Ppd) != HIDP_STATUS_SUCCESS)
-            return bRet;
-
-    ULONG numValues = 0;
-    ULONG i;
-    for (i = 0; i < HidDevice->Caps.NumberInputValueCaps; i++, valueCaps++)
+    if (_Caps.NumberInputValueCaps > 0)
     {
-        if (valueCaps->IsRange)
+        if (HidP_GetValueCaps(HidP_Input, InputValueCaps,
+                  &_Caps.NumberInputValueCaps, _ppd) != HIDP_STATUS_SUCCESS)
         {
-            numValues += valueCaps->Range.UsageMax - valueCaps->Range.UsageMin + 1;
+            throw "GetValueCaps";
+        }
+    }
 
-            if (valueCaps->Range.UsageMin > valueCaps->Range.UsageMax)
-                return bRet;  // overrun check
+    ULONG inpNumValues = 0;
+    for (ULONG i = 0; i < _Caps.NumberInputValueCaps; i++)
+    {
+        if (InputValueCaps[i].IsRange)
+        {
+            inpNumValues += InputValueCaps[i].Range.UsageMax - InputValueCaps[i].Range.UsageMin + 1;
+
+            if (InputValueCaps[i].Range.UsageMin > InputValueCaps[i].Range.UsageMax)
+                throw "Range incorrect";
         }
         else
         {
-            numValues++;
+            inpNumValues++;
         }
     }
 
-    valueCaps = HidDevice->InputValueCaps;
-    HidDevice->InputDataLength = HidDevice->Caps.NumberInputButtonCaps + numValues;
+    HIDP_VALUE_CAPS *inpValueCaps = InputValueCaps;
+    InputDataLength = _Caps.NumberInputButtonCaps + inpNumValues;
+    InputData = new HID_DATA[InputDataLength];
+    HID_DATA *data = InputData;
+    UINT dataIdx = 0;
+    HIDP_BUTTON_CAPS *inpButtonCaps = InputButtonCaps;
 
-    void *tmp;
-    HID_DATA *data = new HID_DATA[HidDevice->InputDataLength];
-    HidDevice->InputData = data;
-
-    if (data == NULL)
-        return bRet;
-
-    // Fill in the button data
-    dataIdx = 0;
-    for (i = 0;
-         i < HidDevice->Caps.NumberInputButtonCaps;
-         i++, data++, buttonCaps++, dataIdx++)
+    for (ULONG i = 0; i < _Caps.NumberInputButtonCaps;
+         i++, data++, inpButtonCaps++, dataIdx++)
     {
         data->IsButtonData = TRUE;
         data->Status = HIDP_STATUS_SUCCESS;
-        data->UsagePage = buttonCaps->UsagePage;
+        data->UsagePage = inpButtonCaps->UsagePage;
 
-        if (buttonCaps->IsRange)
+        if (inpButtonCaps->IsRange)
         {
-            data->ButtonData.UsageMin = buttonCaps->Range.UsageMin;
-            data->ButtonData.UsageMax = buttonCaps->Range.UsageMax;
+            data->ButtonData.UsageMin = inpButtonCaps->Range.UsageMin;
+            data->ButtonData.UsageMax = inpButtonCaps->Range.UsageMax;
         }
         else
         {
-            data -> ButtonData.UsageMin = data->ButtonData.UsageMax = buttonCaps->NotRange.Usage;
+            data->ButtonData.UsageMin = data->ButtonData.UsageMax = inpButtonCaps->NotRange.Usage;
         }
 
         data->ButtonData.MaxUsageLength = HidP_MaxUsageListLength(
-                    HidP_Input, buttonCaps->UsagePage, HidDevice->Ppd);
+                    HidP_Input, inpButtonCaps->UsagePage, _ppd);
 
         data->ButtonData.Usages = new USAGE[data->ButtonData.MaxUsageLength];
-        data->ReportID = buttonCaps->ReportID;
+        data->ReportID = inpButtonCaps->ReportID;
     }
 
-    // Fill in the value data
-    for (i = 0; i < HidDevice->Caps.NumberInputValueCaps ; i++, valueCaps++)
+    for (ULONG i = 0; i < _Caps.NumberInputValueCaps ; i++, inpValueCaps++)
     {
-        if (valueCaps->IsRange)
+        if (inpValueCaps->IsRange)
         {
-            for (usage = valueCaps->Range.UsageMin;
-                 usage <= valueCaps->Range.UsageMax;
+            for (USAGE usage = inpValueCaps->Range.UsageMin;
+                 usage <= inpValueCaps->Range.UsageMax;
                  usage++)
             {
-                if (dataIdx >= HidDevice->InputDataLength)
-                    return bRet; // error case
+                if (dataIdx >= InputDataLength)
+                    throw "Out of bounds!";
 
                 data->IsButtonData = FALSE;
                 data->Status = HIDP_STATUS_SUCCESS;
-                data->UsagePage = valueCaps->UsagePage;
+                data->UsagePage = inpValueCaps->UsagePage;
                 data->ValueData.Usage = usage;
-                data->ReportID = valueCaps -> ReportID;
+                data->ReportID = inpValueCaps -> ReportID;
                 data++;
                 dataIdx++;
             }
         }
         else
         {
-            if (dataIdx >= HidDevice->InputDataLength)
-                return bRet;
+            if (dataIdx >= InputDataLength)
+                throw "Out of bounds!";
 
             data->IsButtonData = FALSE;
             data->Status = HIDP_STATUS_SUCCESS;
-            data->UsagePage = valueCaps->UsagePage;
-            data->ValueData.Usage = valueCaps->NotRange.Usage;
-            data->ReportID = valueCaps -> ReportID;
+            data->UsagePage = inpValueCaps->UsagePage;
+            data->ValueData.Usage = inpValueCaps->NotRange.Usage;
+            data->ReportID = inpValueCaps->ReportID;
             data++;
             dataIdx++;
         }
     }
+}
 
-    // setup Output Data buffers.
-    HidDevice->OutputReportBuffer = new char[HidDevice->Caps.OutputReportByteLength];
-    tmp = calloc(HidDevice->Caps.NumberOutputButtonCaps, sizeof(HIDP_BUTTON_CAPS));
-    HidDevice->OutputButtonCaps = buttonCaps = PHIDP_BUTTON_CAPS(tmp);
+void HidDevice::_fillOutputInfo()
+{
+    _dev.OutputReportBuffer = new char[_Caps.OutputReportByteLength];
+    _dev.OutputButtonCaps = new HIDP_BUTTON_CAPS[_Caps.NumberOutputButtonCaps];
+    _dev.OutputValueCaps = new HIDP_VALUE_CAPS[_Caps.NumberOutputValueCaps];
 
-    if (NULL == buttonCaps)
-        return bRet;
-
-    tmp = calloc(HidDevice->Caps.NumberOutputValueCaps, sizeof (HIDP_VALUE_CAPS));
-    HidDevice->OutputValueCaps = valueCaps = reinterpret_cast<HIDP_VALUE_CAPS *>(tmp);
-
-    if (NULL == valueCaps)
-        return bRet;
-
-    numCaps = HidDevice->Caps.NumberOutputButtonCaps;
-
-    if (numCaps > 0)
+    if (_Caps.NumberOutputButtonCaps > 0)
     {
-        if ((HidP_GetButtonCaps(HidP_Output, buttonCaps, &numCaps,
-                        HidDevice->Ppd)) != HIDP_STATUS_SUCCESS)
+        if (HidP_GetButtonCaps(HidP_Output, _dev.OutputButtonCaps,
+                     &_Caps.NumberOutputButtonCaps, _ppd) != HIDP_STATUS_SUCCESS)
         {
-            return bRet;
+            throw "GetButtonCaps";
         }
     }
 
-    numCaps = HidDevice->Caps.NumberOutputValueCaps;
-
-    if (numCaps > 0)
+    if (_Caps.NumberOutputValueCaps > 0)
     {
-        if ((HidP_GetValueCaps(HidP_Output, valueCaps, &numCaps,
-                      HidDevice->Ppd)) != HIDP_STATUS_SUCCESS)
+        if (HidP_GetValueCaps(HidP_Output, _dev.OutputValueCaps,
+                     &_Caps.NumberOutputValueCaps, _ppd) != HIDP_STATUS_SUCCESS)
         {
-            return bRet;
+            throw "GetValueCaps";
         }
     }
 
-    numValues = 0;
-
-    for (i = 0; i < HidDevice->Caps.NumberOutputValueCaps; i++, valueCaps++)
+    ULONG numValues = 0;
+    for (ULONG i = 0; i < _Caps.NumberOutputValueCaps; i++)
     {
-        if (valueCaps->IsRange)
+        if (_dev.OutputValueCaps[i].IsRange)
         {
-            numValues += valueCaps->Range.UsageMax - valueCaps->Range.UsageMin + 1;
+            numValues += _dev.OutputValueCaps[i].Range.UsageMax - _dev.OutputValueCaps[i].Range.UsageMin + 1;
         }
         else
         {
@@ -423,118 +401,110 @@ BOOLEAN HidDevice::_FillDeviceInfo()
         }
     }
 
-    valueCaps = HidDevice->OutputValueCaps;
-    HidDevice->OutputDataLength = HidDevice->Caps.NumberOutputButtonCaps + numValues;
-    tmp = calloc(HidDevice->OutputDataLength, sizeof (HID_DATA));
-    HidDevice->OutputData = data = reinterpret_cast<HID_DATA *>(tmp);
+    HIDP_VALUE_CAPS *valueCaps = _dev.OutputValueCaps;
+    _dev.OutputDataLength = _Caps.NumberOutputButtonCaps + numValues;
+    _dev.OutputData = new HID_DATA[_dev.OutputDataLength];
+    HID_DATA *outData = _dev.OutputData;
 
-    if (data == NULL)
-        return bRet;
-
-    for (i = 0; i < HidDevice->Caps.NumberOutputButtonCaps; i++, data++, buttonCaps++)
+    ULONG tmpSum;
+    HIDP_BUTTON_CAPS *buttonCaps = _dev.OutputButtonCaps;
+    for (ULONG i = 0; i < _Caps.NumberOutputButtonCaps; i++, outData++, buttonCaps++)
     {
-        if (i >= HidDevice->OutputDataLength)
+        if (i >= _dev.OutputDataLength)
         {
-            return bRet;
+            throw "Out of bounds!";
         }
 
-        if (FAILED(ULongAdd((HidDevice->Caps).NumberOutputButtonCaps ,
-                                     (valueCaps->Range).UsageMax, &tmpSum)))
+        if (ULongAdd(_Caps.NumberOutputButtonCaps, valueCaps->Range.UsageMax, &tmpSum) < 0)
         {
-            return bRet;
+            throw "Out of bounds!";
         }
 
-        if ((valueCaps->Range).UsageMin == tmpSum)
-            return bRet;
+        if (valueCaps->Range.UsageMin == tmpSum)
+            throw "Error";
 
-        data->IsButtonData = TRUE;
-        data->Status = HIDP_STATUS_SUCCESS;
-        data->UsagePage = buttonCaps->UsagePage;
+        outData->IsButtonData = TRUE;
+        outData->Status = HIDP_STATUS_SUCCESS;
+        outData->UsagePage = buttonCaps->UsagePage;
 
         if (buttonCaps->IsRange)
         {
-            data->ButtonData.UsageMin = buttonCaps -> Range.UsageMin;
-            data->ButtonData.UsageMax = buttonCaps -> Range.UsageMax;
+            outData->ButtonData.UsageMin = buttonCaps->Range.UsageMin;
+            outData->ButtonData.UsageMax = buttonCaps->Range.UsageMax;
         }
         else
         {
-            data->ButtonData.UsageMin = data->ButtonData.UsageMax = buttonCaps->NotRange.Usage;
+            outData->ButtonData.UsageMin = outData->ButtonData.UsageMax = buttonCaps->NotRange.Usage;
         }
 
-        data->ButtonData.MaxUsageLength = HidP_MaxUsageListLength(
-                        HidP_Output, buttonCaps->UsagePage, HidDevice->Ppd);
+        outData->ButtonData.MaxUsageLength = HidP_MaxUsageListLength(
+                        HidP_Output, buttonCaps->UsagePage, _ppd);
 
-        tmp = calloc(data->ButtonData.MaxUsageLength, sizeof (USAGE));
-        data->ButtonData.Usages = (PUSAGE)tmp;
-        data->ReportID = buttonCaps->ReportID;
+        outData->ButtonData.Usages = new USAGE[outData->ButtonData.MaxUsageLength];
+        outData->ReportID = buttonCaps->ReportID;
     }
 
-    for (i = 0; i < HidDevice->Caps.NumberOutputValueCaps; i++, valueCaps++)
+    for (ULONG i = 0; i < _Caps.NumberOutputValueCaps; i++, valueCaps++)
     {
         if (valueCaps->IsRange)
         {
-            for (usage = valueCaps->Range.UsageMin;
+            for (USAGE usage = valueCaps->Range.UsageMin;
                  usage <= valueCaps->Range.UsageMax;
                  usage++)
             {
-                data->IsButtonData = FALSE;
-                data->Status = HIDP_STATUS_SUCCESS;
-                data->UsagePage = valueCaps->UsagePage;
-                data->ValueData.Usage = usage;
-                data->ReportID = valueCaps -> ReportID;
-                data++;
+                outData->IsButtonData = FALSE;
+                outData->Status = HIDP_STATUS_SUCCESS;
+                outData->UsagePage = valueCaps->UsagePage;
+                outData->ValueData.Usage = usage;
+                outData->ReportID = valueCaps -> ReportID;
+                outData++;
             }
         }
         else
         {
-            data->IsButtonData = FALSE;
-            data->Status = HIDP_STATUS_SUCCESS;
-            data->UsagePage = valueCaps->UsagePage;
-            data->ValueData.Usage = valueCaps->NotRange.Usage;
-            data->ReportID = valueCaps -> ReportID;
-            data++;
+            outData->IsButtonData = FALSE;
+            outData->Status = HIDP_STATUS_SUCCESS;
+            outData->UsagePage = valueCaps->UsagePage;
+            outData->ValueData.Usage = valueCaps->NotRange.Usage;
+            outData->ReportID = valueCaps -> ReportID;
+            outData++;
         }
     }
+}
 
-    // setup Feature Data buffers.
-    tmp = calloc(HidDevice->Caps.FeatureReportByteLength, sizeof (CHAR));
-    HidDevice->FeatureReportBuffer = (PCHAR)tmp;
-    tmp = calloc(HidDevice->Caps.NumberFeatureButtonCaps, sizeof(HIDP_BUTTON_CAPS));
-    HidDevice->FeatureButtonCaps = buttonCaps = PHIDP_BUTTON_CAPS(tmp);
-
-    if (NULL == buttonCaps)
-        return bRet;
-
-    tmp = calloc(HidDevice->Caps.NumberFeatureValueCaps, sizeof (HIDP_VALUE_CAPS));
-    HidDevice->FeatureValueCaps = valueCaps = PHIDP_VALUE_CAPS(tmp);
-
-    if (NULL == valueCaps)
-        return bRet;
-
-    numCaps = HidDevice->Caps.NumberFeatureButtonCaps;
+void HidDevice::_fillFeatureInfo()
+{
+    void *tmp;
+    _dev.FeatureReportBuffer = new char[_Caps.FeatureReportByteLength];
+    _dev.FeatureButtonCaps = new HIDP_BUTTON_CAPS[_Caps.NumberFeatureButtonCaps];
+    HIDP_BUTTON_CAPS *buttonCaps = _dev.FeatureButtonCaps;
+    tmp = calloc(_Caps.NumberFeatureValueCaps, sizeof (HIDP_VALUE_CAPS));
+    HIDP_VALUE_CAPS *valueCaps;
+    _dev.FeatureValueCaps = valueCaps = PHIDP_VALUE_CAPS(tmp);
+    USHORT numCaps = _Caps.NumberFeatureButtonCaps;
 
     if (numCaps > 0)
     {
-        if (HIDP_STATUS_SUCCESS != (HidP_GetButtonCaps(HidP_Feature,
-                            buttonCaps, &numCaps, HidDevice->Ppd)))
+        if (HIDP_STATUS_SUCCESS != HidP_GetButtonCaps(HidP_Feature,
+                            buttonCaps, &numCaps, _ppd))
         {
-            return bRet;
+            throw "GetButtonCaps";
         }
     }
 
-    numCaps = HidDevice->Caps.NumberFeatureValueCaps;
+    numCaps = _Caps.NumberFeatureValueCaps;
 
     if (numCaps > 0)
     {
         if (HIDP_STATUS_SUCCESS != HidP_GetValueCaps(HidP_Feature,
-                           valueCaps, &numCaps, HidDevice->Ppd))
+                           valueCaps, &numCaps, _ppd))
         {
-            return bRet;
+            throw "GetValueCaps";
         }
     }
 
-    numValues = 0;
-    for (i = 0; i < HidDevice->Caps.NumberFeatureValueCaps; i++, valueCaps++)
+    ULONG numValues = 0;
+    for (ULONG i = 0; i < _Caps.NumberFeatureValueCaps; i++, valueCaps++)
     {
         if (valueCaps->IsRange)
         {
@@ -545,24 +515,21 @@ BOOLEAN HidDevice::_FillDeviceInfo()
             numValues++;
         }
     }
-    valueCaps = HidDevice->FeatureValueCaps;
+    valueCaps = _dev.FeatureValueCaps;
+    ULONG newFeatureDataLength = 0;
 
-    if (ULongAdd(HidDevice->Caps.NumberFeatureButtonCaps,
-                                 numValues, &newFeatureDataLength) < 0)
+    if (ULongAdd(_Caps.NumberFeatureButtonCaps,
+                   numValues, &newFeatureDataLength) < 0)
     {
-        return bRet;
+        throw "Error";
     }
 
-    HidDevice->FeatureDataLength = newFeatureDataLength;
-    tmp = calloc(HidDevice->FeatureDataLength, sizeof(HID_DATA));
-    HidDevice->FeatureData = data = (HID_DATA *)(tmp);
-
-    if (NULL == data)
-        return bRet;
-
-    dataIdx = 0;
-    for (i = 0;
-         i < HidDevice->Caps.NumberFeatureButtonCaps;
+    _dev.FeatureDataLength = newFeatureDataLength;
+    tmp = calloc(_dev.FeatureDataLength, sizeof(HID_DATA));
+    HID_DATA *data;
+    _dev.FeatureData = data = (HID_DATA *)(tmp);
+    UINT dataIdx = 0;
+    for (ULONG i = 0; i < _Caps.NumberFeatureButtonCaps;
          i++, data++, buttonCaps++, dataIdx++)
     {
         data->IsButtonData = TRUE;
@@ -580,53 +547,49 @@ BOOLEAN HidDevice::_FillDeviceInfo()
         }
 
         data->ButtonData.MaxUsageLength = HidP_MaxUsageListLength(
-                   HidP_Feature, buttonCaps->UsagePage, HidDevice->Ppd);
+                   HidP_Feature, buttonCaps->UsagePage, _ppd);
 
         data->ButtonData.Usages = new USAGE[data->ButtonData.MaxUsageLength];
-        data->ReportID = buttonCaps -> ReportID;
+        data->ReportID = buttonCaps->ReportID;
     }
 
-    for (i = 0; i < HidDevice->Caps.NumberFeatureValueCaps ; i++, valueCaps++)
+    for (ULONG i = 0; i < _Caps.NumberFeatureValueCaps ; i++, valueCaps++)
     {
         if (valueCaps->IsRange)
         {
-            for (usage = valueCaps->Range.UsageMin;
+            for (USAGE usage = valueCaps->Range.UsageMin;
                  usage <= valueCaps->Range.UsageMax;
                  usage++)
             {
-                if (dataIdx >= HidDevice->FeatureDataLength)
-                    return bRet;
+                if (dataIdx >= _dev.FeatureDataLength)
+                    throw "Out of bounds!";
 
                 data->IsButtonData = FALSE;
                 data->Status = HIDP_STATUS_SUCCESS;
                 data->UsagePage = valueCaps->UsagePage;
                 data->ValueData.Usage = usage;
-                data->ReportID = valueCaps -> ReportID;
+                data->ReportID = valueCaps->ReportID;
                 data++;
                 dataIdx++;
             }
         }
         else
         {
-            if (dataIdx >= HidDevice->FeatureDataLength)
-                return bRet;
+            if (dataIdx >= _dev.FeatureDataLength)
+                throw "Out of bounds!";
 
             data->IsButtonData = FALSE;
             data->Status = HIDP_STATUS_SUCCESS;
             data->UsagePage = valueCaps->UsagePage;
             data->ValueData.Usage = valueCaps->NotRange.Usage;
-            data->ReportID = valueCaps -> ReportID;
+            data->ReportID = valueCaps->ReportID;
             data++;
             dataIdx++;
         }
     }
-
-    bRet = TRUE;
-    return bRet;
 }
 
-BOOLEAN HidDevice::open(
-    LPCSTR path, BOOL hasReadAccess, BOOL hasWriteAccess,
+BOOLEAN HidDevice::open(LPCSTR path, BOOL read, BOOL write,
     BOOL isOverlapped, BOOL isExclusive)
 {
     DWORD accessFlags = 0;
@@ -638,18 +601,12 @@ BOOLEAN HidDevice::open(
     if (path == NULL)
         return FALSE;
 
-    INT iDevicePathSize = INT(strlen(path) + 1);
-    _dev.DevicePath = new char[iDevicePathSize];
+    _path = std::string(path);
 
-    if (_dev.DevicePath == NULL)
-        goto Done;
-
-    StringCbCopyA(_dev.DevicePath, iDevicePathSize, path);
-
-    if (hasReadAccess)
+    if (read)
         accessFlags |= GENERIC_READ;
 
-    if (hasWriteAccess)
+    if (write)
         accessFlags |= GENERIC_WRITE;
 
     if (!isExclusive)
@@ -660,22 +617,18 @@ BOOLEAN HidDevice::open(
     if (handle() == INVALID_HANDLE_VALUE)
         goto Done;
 
-    _dev.OpenedForRead = hasReadAccess;
-    _dev.OpenedForWrite = hasWriteAccess;
-    _dev.OpenedOverlapped = isOverlapped;
-    _dev.OpenedExclusive = isExclusive;
-
-    if (!HidD_GetPreparsedData(handle(), &_dev.Ppd))
+    if (!HidD_GetPreparsedData(handle(), &_ppd))
         goto Done;
 
-    if (!HidD_GetAttributes(handle(), &_dev.Attributes))
+    if (!HidD_GetAttributes(handle(), &_Attributes))
         goto Done;
 
-    if (!HidP_GetCaps(_dev.Ppd, &_dev.Caps))
+    if (!HidP_GetCaps(_ppd, &_Caps))
         goto Done;
 
-    if (_FillDeviceInfo() == FALSE)
-        goto Done;
+    _fillInputInfo();
+    _fillOutputInfo();
+    _fillFeatureInfo();
 
     if (isOverlapped)
     {
@@ -700,28 +653,22 @@ Done:
 
 VOID HidDevice::_CloseHidDevice(HID_DEVICE *HidDevice)
 {
-    if (HidDevice->DevicePath != NULL)
-    {
-        free(HidDevice->DevicePath);
-        HidDevice->DevicePath = NULL;
-    }
-
     if (handle() != INVALID_HANDLE_VALUE)
     {
         CloseHandle(_handle);
         _handle = INVALID_HANDLE_VALUE;
     }
-
-    if (NULL != HidDevice->Ppd)
+#if 0
+    if (_ppd != NULL)
     {
-        HidD_FreePreparsedData(HidDevice->Ppd);
-        HidDevice -> Ppd = NULL;
+        HidD_FreePreparsedData(_ppd);
+        _ppd = NULL;
     }
 
-    if (NULL != HidDevice -> InputReportBuffer)
+    if (NULL != InputReportBuffer)
     {
-        free(HidDevice -> InputReportBuffer);
-        HidDevice -> InputReportBuffer = NULL;
+        free(InputReportBuffer);
+        InputReportBuffer = NULL;
     }
 
     if (NULL != HidDevice -> InputData)
@@ -741,7 +688,7 @@ VOID HidDevice::_CloseHidDevice(HID_DEVICE *HidDevice)
         free(HidDevice -> InputValueCaps);
         HidDevice -> InputValueCaps = NULL;
     }
-
+#endif
     if (NULL != HidDevice -> OutputReportBuffer)
     {
         free(HidDevice -> OutputReportBuffer);

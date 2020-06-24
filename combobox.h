@@ -10,6 +10,8 @@ private:
 public:
     Combobox();
     LRESULT addStr(STRSAFE_LPCSTR pszFormat, ...);
+    LRESULT setItemDataA(INT index, LPARAM value);
+    LRESULT reset();
 };
 
 #endif

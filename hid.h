@@ -25,29 +25,14 @@ Environment:
 #include <setupapi.h>
 #include <iostream>
 
-struct SP_FNCLASS_DEVICE_DATA
-{
-    DWORD cbSize;
-    GUID  FunctionClassGuid;
-    TCHAR DevicePath [ANYSIZE_ARRAY];
-};
-
-// A structure to hold the steady state data received from the hid device.
-// Each time a read packet is received we fill in this structure.
-// Each time we wish to write to a hid device we fill in this structure.
-// This structure is here only for convenience.  Most real applications will
-// have a more efficient way of moving the hid data to the read, write, and
-// feature routines.
 struct HID_DATA
 {
-    BOOLEAN     IsButtonData;
-    UCHAR       Reserved;
-    USAGE       UsagePage;   // The usage page for which we are looking.
-    NTSTATUS Status;      // The last status returned from the accessor function
-                            // when updating this field.
-    ULONG       ReportID;    // ReportID for this given data structure
-    BOOLEAN     IsDataSet;   // Variable to track whether a given data structure
-                            //  has already been added to a report structure
+    BOOLEAN IsButtonData;
+    UCHAR Reserved;
+    USAGE UsagePage;
+    NTSTATUS Status;
+    ULONG ReportID;
+    BOOLEAN IsDataSet;
 
    union {
       struct {
@@ -58,35 +43,23 @@ struct HID_DATA
 
       } ButtonData;
       struct {
-         USAGE       Usage; // The usage describing this value;
-         USHORT      Reserved;
+         USAGE Usage; // The usage describing this value;
+         USHORT Reserved;
 
-         ULONG       Value;
-         LONG        ScaledValue;
+         ULONG Value;
+         LONG ScaledValue;
       } ValueData;
    };
 };
 
 struct HID_DEVICE
 {
-    CHAR *DevicePath;
-    BOOL OpenedForRead;
-    BOOL OpenedForWrite;
-    BOOL OpenedOverlapped;
-    BOOL OpenedExclusive;
-    _HIDP_PREPARSED_DATA *Ppd; // The opaque parser info describing this device
-    HIDP_CAPS Caps; // The Capabilities of this hid device.
-    HIDD_ATTRIBUTES Attributes;
-    CHAR *InputReportBuffer;
-    HID_DATA *InputData; // array of hid data structures
-    ULONG InputDataLength; // Num elements in this array.
-    HIDP_BUTTON_CAPS *InputButtonCaps;
-    HIDP_VALUE_CAPS *InputValueCaps;
     CHAR *OutputReportBuffer;
     HID_DATA *OutputData;
     ULONG OutputDataLength;
     HIDP_BUTTON_CAPS *OutputButtonCaps;
     HIDP_VALUE_CAPS *OutputValueCaps;
+
     CHAR *FeatureReportBuffer;
     HID_DATA *FeatureData;
     ULONG FeatureDataLength;
@@ -94,39 +67,45 @@ struct HID_DEVICE
     HIDP_VALUE_CAPS *FeatureValueCaps;
 };
 
-BOOLEAN UnpackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
-   HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
-   ULONG DataLength, PHIDP_PREPARSED_DATA Ppd);
-
 class HidDevice
 {
 private:
     HANDLE _handle;
     HID_DEVICE _dev;
-    BOOLEAN _FillDeviceInfo();
+    std::string _path;
+    HIDD_ATTRIBUTES _Attributes;
+    _HIDP_PREPARSED_DATA *_ppd;
+    HIDP_CAPS _Caps;
+    CHAR *InputReportBuffer;
+    HID_DATA *InputData;
+    ULONG InputDataLength;
+    HIDP_BUTTON_CAPS *InputButtonCaps;
+    HIDP_VALUE_CAPS *InputValueCaps;
+    void _fillInputInfo();
+    void _fillOutputInfo();
+    void _fillFeatureInfo();
     VOID _CloseHidDevice(HID_DEVICE *HidDevice);
-
-    BOOLEAN PackReport(PCHAR ReportBuffer, USHORT ReportBufferLength,
-                       HIDP_REPORT_TYPE ReportType, HID_DATA *Data,
-                       ULONG DataLength, PHIDP_PREPARSED_DATA Ppd);
+    BOOLEAN PackReport(HID_DATA *Data, ULONG DataLength);
+    BOOLEAN _UnpackReport();
 public:
     HidDevice();
     ~HidDevice();
-    void set(HID_DEVICE dev);
-    HID_DEVICE get() const;
     HID_DEVICE *getp();
     LPCSTR devicePath() const;
     HANDLE handle() const;
+    const HIDD_ATTRIBUTES *attributes() const;
     HID_DATA *inputData() const;
     ULONG inputDataLen() const;
-
+    USHORT vendorId() const;
+    USHORT productId() const;
+    const HIDP_CAPS *caps();
+    const HIDP_BUTTON_CAPS *inputButtonCaps() const;
+    const HIDP_VALUE_CAPS *inputValueCaps() const;
     BOOLEAN read();
     BOOLEAN write();
     BOOLEAN readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap);
     void close();
-
-    BOOLEAN open(LPCSTR path, BOOL hasReadAccess, BOOL hasWriteAccess,
-                 BOOL isOverlapped, BOOL isExclusive);
+    BOOLEAN open(LPCSTR path, BOOL read, BOOL write, BOOL overlapped, BOOL exclusive);
 };
 
 class HidButtonCaps

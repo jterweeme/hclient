@@ -1,7 +1,8 @@
 #include "hidinfo.h"
 #include "hclient.h"
 
-void HidInfo::displayDeviceAttributes(HIDD_ATTRIBUTES *pAttrib, Listbox &lb)
+void HidInfo::displayDeviceAttributes(
+    const HIDD_ATTRIBUTES *pAttrib, Listbox &lb) const
 {
     lb.addStr("Vendor ID: 0x%x", pAttrib->VendorID);
     lb.addStr("Product ID: 0x%x", pAttrib->ProductID);
@@ -57,7 +58,8 @@ std::string HidInfo::report(HID_DATA *data)
     return std::string(buf);
 }
 
-void HidInfo::displayValueAttributes(HIDP_VALUE_CAPS *pValue, Listbox &lb)
+void HidInfo::displayValueAttributes(
+    HIDP_VALUE_CAPS *pValue, Listbox &lb) const
 {
     CHAR szTempBuff[SMALL_BUFF];
     lb.addStr("Report ID 0x%x", pValue->ReportID);
@@ -127,7 +129,7 @@ void HidInfo::displayValueAttributes(HIDP_VALUE_CAPS *pValue, Listbox &lb)
     lb.addStr(pValue->IsAbsolute ? "Absolute: Yes" : "Absolute: No");
 }
 
-void HidInfo::displayDeviceCaps(HIDP_CAPS *pCaps, Listbox &lb)
+void HidInfo::displayDeviceCaps(const HIDP_CAPS *pCaps, Listbox &lb) const
 {
     lb.sendMsgA(LB_RESETCONTENT, 0, 0);
     lb.addStr("Usage Page: 0x%x", pCaps->UsagePage);
@@ -138,11 +140,12 @@ void HidInfo::displayDeviceCaps(HIDP_CAPS *pCaps, Listbox &lb)
     lb.addStr("Number of collection nodes %d: ", pCaps->NumberLinkCollectionNodes);
 }
 
-void HidInfo::displayInputButtons(HidDevice *pDevice, Listbox &lb)
+void HidInfo::displayInputButtons(HidDevice *pDevice, Listbox &lb) const
 {
     lb.sendMsgA(LB_RESETCONTENT, 0, LPARAM(0));
-    HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->InputButtonCaps;
-    const USHORT nCaps = pDevice->getp()->Caps.NumberInputButtonCaps;
+    const HIDP_BUTTON_CAPS *pButtonCaps = pDevice->inputButtonCaps();
+    //HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->InputButtonCaps;
+    const USHORT nCaps = pDevice->caps()->NumberInputButtonCaps;
 
     for (INT iLoop = 0; iLoop < nCaps; iLoop++)
     {
@@ -224,9 +227,9 @@ void HidInfo::displayInputValues(HidDevice *pDevice, Listbox &lb)
 {
     CHAR szTempBuff[SMALL_BUFF];
     lb.sendMsgA(LB_RESETCONTENT, 0, 0);
-    HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->InputValueCaps;
+    const HIDP_VALUE_CAPS *pValueCaps = pDevice->inputValueCaps();
 
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberInputValueCaps; iLoop++)
+    for (INT iLoop = 0; iLoop < pDevice->caps()->NumberInputValueCaps; iLoop++)
     {
         StringCbPrintfA(szTempBuff, SMALL_BUFF, "Input value cap # %d", iLoop);
         INT iIndex = INT(lb.sendMsgA(LB_ADDSTRING, 0, LPARAM(szTempBuff)));
@@ -245,7 +248,7 @@ void HidInfo::displayOutputButtons(HidDevice *pDevice, Listbox &lb)
     lb.sendMsgA(LB_RESETCONTENT, 0, LPARAM(0));
     HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->OutputButtonCaps;
 
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberOutputButtonCaps; iLoop++)
+    for (INT iLoop = 0; iLoop < pDevice->caps()->NumberOutputButtonCaps; iLoop++)
     {
         INT iIndex = INT(lb.addStr("Output button cap # %d", iLoop));
 
@@ -263,7 +266,7 @@ void HidInfo::displayOutputValues(HidDevice *pDevice, Listbox &lb)
     lb.sendMsgA(LB_RESETCONTENT, 0, 0);
     HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->OutputValueCaps;
 
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberOutputValueCaps; iLoop++)
+    for (INT iLoop = 0; iLoop < pDevice->caps()->NumberOutputValueCaps; iLoop++)
     {
         INT iIndex = INT(lb.addStr("Output value cap # %d", iLoop));
 
@@ -276,13 +279,13 @@ void HidInfo::displayOutputValues(HidDevice *pDevice, Listbox &lb)
     lb.sendMsgA(LB_SETCURSEL, 0, 0);
 }
 
-void HidInfo::displayFeatureButtons(HidDevice *pDevice, Listbox &lb)
+void HidInfo::displayFeatureButtons(HidDevice *pDevice, Listbox &lb) const
 {
     CHAR szTempBuff[SMALL_BUFF];
     lb.sendMsgA(LB_RESETCONTENT, 0, 0);
     HIDP_BUTTON_CAPS *pButtonCaps = pDevice->getp()->FeatureButtonCaps;
 
-    USHORT nCaps = pDevice->getp()->Caps.NumberFeatureButtonCaps;
+    USHORT nCaps = pDevice->caps()->NumberFeatureButtonCaps;
     for (USHORT iLoop = 0; iLoop < nCaps; iLoop++)
     {
         StringCbPrintfA(szTempBuff, SMALL_BUFF, "Feature button cap # %d", iLoop);
@@ -296,16 +299,16 @@ void HidInfo::displayFeatureButtons(HidDevice *pDevice, Listbox &lb)
     lb.sendMsgA(LB_SETCURSEL, 0, 0);
 }
 
-void HidInfo::displayFeatureValues(HidDevice *pDevice, Listbox &lb)
+void HidInfo::displayFeatureValues(HidDevice *pDevice, Listbox &lb) const
 {
     CHAR szTempBuff[SMALL_BUFF];
     lb.sendMsgA(LB_RESETCONTENT, 0, 0);
     HIDP_VALUE_CAPS *pValueCaps = pDevice->getp()->FeatureValueCaps;
 
-    for (INT iLoop = 0; iLoop < pDevice->getp()->Caps.NumberFeatureValueCaps; iLoop++)
+    for (INT iLoop = 0; iLoop < pDevice->caps()->NumberFeatureValueCaps; iLoop++)
     {
         StringCbPrintfA(szTempBuff, SMALL_BUFF, "Feature value cap # %d", iLoop);
-        INT iIndex = INT(lb.sendMsgA(LB_ADDSTRING, 0, LPARAM(szTempBuff)));
+        INT iIndex = INT(lb.addStr(szTempBuff));
 
         if (iIndex != -1)
             lb.sendMsgA(LB_SETITEMDATA, iIndex, LPARAM(pValueCaps));
