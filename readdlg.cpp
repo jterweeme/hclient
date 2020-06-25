@@ -45,7 +45,7 @@ DWORD WINAPI ReadDialog::AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
     // Create the completion event to send to the the OverlappedRead routine
     HANDLE completionEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     HidDevice *hidDevice = Context->hidDevice2;
-    HID_DEVICE *tmp = hidDevice->getp();
+    //HID_DEVICE *tmp = hidDevice->getp();
 
     if (completionEvent == NULL)
         goto AsyncRead_End;
@@ -80,7 +80,7 @@ DWORD WINAPI ReadDialog::AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
 #if 0
             UnpackReport(tmp->InputReportBuffer, tmp->Caps.InputReportByteLength,
                      HidP_Input, tmp->InputData, tmp->InputDataLength, tmp->Ppd);
-#endif
+
 
             if (Context->DisplayEvent != NULL)
             {
@@ -90,7 +90,7 @@ DWORD WINAPI ReadDialog::AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
             else if (Context->DisplayWindow != NULL)
             {
                 HID_DEVICE *pDevice = tmp;
-#if 0
+
                 HID_DATA *pData = pDevice->InputData;
 
                 SendMessageA(GetDlgItem(Context->DisplayWindow, IDC_CALLOUTPUT),
@@ -106,8 +106,9 @@ DWORD WINAPI ReadDialog::AsynchReadThreadProc(READ_THREAD_CONTEXT *Context)
                     lb.addStr(foo.c_str());
                     pData++;
                 }
-#endif
+
             }
+#endif
         }
     } while (readResult && !Context->TerminateThread &&
               (INFINITE_READS == Context->NumberOfReads ||
@@ -159,7 +160,8 @@ INT_PTR ReadDialog::_display(LPARAM lp)
     if (_lbCounter > MAX_LB_ITEMS)
         _lbOutput.sendMsgA(LB_DELETESTRING, 0, 0);
 
-    for (UINT uLoop = 0; uLoop < pDevice2->inputDataLen(); uLoop++)
+    ULONG dataLen = pDevice2->input()->dataLength();
+    for (UINT uLoop = 0; uLoop < dataLen; uLoop++)
     {
         std::string s = HidInfo().report(pData);
         INT iIndex = INT(_lbOutput.addStr(s.c_str()));

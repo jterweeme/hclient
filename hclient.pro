@@ -6,6 +6,7 @@ SOURCES += button.cpp\
     hid.cpp\
     hidfinder.cpp\
     hidinfo.cpp\
+    hiditem.cpp\
     list.cpp\
     listbox.cpp\
     main.cpp\
@@ -21,6 +22,7 @@ HEADERS += button.h\
     hid.h\
     hidfinder.h\
     hidinfo.h\
+    hiditem.h\
     list.h\
     listbox.h\
     maindlg.h\

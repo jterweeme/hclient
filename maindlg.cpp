@@ -115,8 +115,8 @@ void MainDialog::_loadDevices()
 
         if (currNode->hidDevice->handle() != INVALID_HANDLE_VALUE)
         {
-            const USHORT vid = currNode->hidDevice->vendorId();
-            const USHORT pid = currNode->hidDevice->productId();
+            USHORT vid = currNode->hidDevice->attributes()->VendorID;
+            USHORT pid = currNode->hidDevice->attributes()->ProductID;
             const HIDP_CAPS *caps = currNode->hidDevice->caps();
             USHORT usagePage = caps->UsagePage;
             USHORT usage = caps->Usage;
@@ -323,14 +323,14 @@ INT_PTR MainDialog::_write()
         return FALSE;
     }
 
-    INT iCount = _prepareDataFields(writeDev.getp()->OutputData, writeDev.getp()->OutputDataLength);
-    iCount = _prepareDataFields2(writeDev.getp()->OutputData, writeDev.getp()->OutputDataLength);
+    INT iCount = _prepareDataFields(writeDev.output()->_data, writeDev.output()->dataLength());
+    iCount = _prepareDataFields2(writeDev.output()->_data, writeDev.output()->dataLength());
 
     if (_bGetData(iCount))
     {
         INT iErrorLine;
 
-        if (_parseData(writeDev.getp()->OutputData, _rWriteData, iCount, &iErrorLine))
+        if (_parseData(writeDev.output()->_data, _rWriteData, iCount, &iErrorLine))
         {
             writeDev.write();
         }
@@ -517,9 +517,8 @@ INT_PTR MainDialog::_itemsProc(WPARAM wParam)
 INT_PTR MainDialog::_caps()
 {
     HidDevice *pDevice2 = _getCurrentDevice();
-    HID_DEVICE *pDevice = pDevice2->getp();
 
-    if (pDevice != nullptr)
+    if (pDevice2 != nullptr)
     {
         HidInfo().displayDeviceCaps(pDevice2->caps(), _lbAttr);
     }
@@ -623,7 +622,7 @@ INT_PTR MainDialog::_devArrival(HWND hDlg, LPARAM lParam)
         if (!res)
         {
             // Save the device path so it can be still listed.
-            INT iDevicePathSize = INT(strlen(pbroadcastInterface->dbcc_name)) + 1;
+            //INT iDevicePathSize = INT(strlen(pbroadcastInterface->dbcc_name)) + 1;
             //listNode->HidDeviceInfo.DevicePath = new char[iDevicePathSize];
 
             if (listNode->hidDevice->devicePath() == NULL)

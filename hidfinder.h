@@ -2,6 +2,7 @@
 #define HIDFINDER_H
 
 #include "hid.h"
+#include <SetupAPI.h>
 
 class PnPFinder
 {
