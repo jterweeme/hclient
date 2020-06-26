@@ -13,6 +13,7 @@ public:
     void importFromDlg(HWND parent, int id);
     LRESULT sendMsgA(UINT msg, WPARAM wp, LPARAM lp) const;
     BOOL enable(BOOL en = TRUE);
+    BOOL disable();
 };
 
 #endif

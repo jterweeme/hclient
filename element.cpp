@@ -16,3 +16,9 @@ BOOL Element::enable(BOOL en)
 {
     return EnableWindow(_hwnd, en);
 }
+
+BOOL Element::disable()
+{
+    return enable(FALSE);
+}
+

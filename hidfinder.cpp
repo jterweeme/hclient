@@ -61,7 +61,16 @@ HidDevice *HidFinder::next()
 {
     std::string path = _pnpFinder->next();
     HidDevice *dev = new HidDevice;
-    dev->open(path.c_str(), FALSE, FALSE, FALSE, FALSE);
+
+    try
+    {
+        dev->open(path.c_str(), FALSE, FALSE, FALSE, FALSE);
+    }
+    catch (...)
+    {
+
+    }
+
     return dev;
 }
 

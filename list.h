@@ -3,8 +3,6 @@
 
 #include <windows.h>
 
-typedef VOID PLIST_CALLBACK(PLIST_ENTRY);
-
 class CList
 {
 private:
@@ -20,7 +18,7 @@ public:
     PLIST_ENTRY removeHead();
     void insertTail(LIST_ENTRY *node);
     BOOL isEmpty() const;
-    void destroyWithCallback(PLIST_CALLBACK cb);
+    //void destroyWithCallback(PLIST_CALLBACK cb);
 };
 
 class CListIterator

@@ -136,15 +136,27 @@ INT_PTR ReadDialog::_initDialog(HWND hDlg)
 
     std::cout << _dev->devicePath() << "a\n";
     std::cout.flush();
-    _doSyncReads = _syncDevice2.open(_dev->devicePath(), TRUE, FALSE, FALSE, FALSE);
 
-    if (!_doSyncReads)
+    try
+    {
+        _syncDevice2.open(_dev->devicePath(), TRUE, FALSE, FALSE, FALSE);
+        _doSyncReads = TRUE;
+    }
+    catch (...)
+    {
+        _doSyncReads = FALSE;
         Toolbox().errorbox(hDlg, "Unable to open device for synchronous reading");
+    }
 
-    _doAsyncReads = _asyncDevice2.open(_dev->devicePath(), TRUE, FALSE, TRUE, FALSE);
-
-    if (!_doAsyncReads)
+    try {
+        _asyncDevice2.open(_dev->devicePath(), TRUE, FALSE, TRUE, FALSE);
+        _doAsyncReads = TRUE;
+    }
+    catch (...)
+    {
+        _doAsyncReads = FALSE;
         Toolbox().errorbox(hDlg, "Unable to open device for asynchronous reading");
+    }
 
     PostMessageA(hDlg, WM_READ_DONE, 0, 0);
     return FALSE;
@@ -153,7 +165,7 @@ INT_PTR ReadDialog::_initDialog(HWND hDlg)
 INT_PTR ReadDialog::_display(LPARAM lp)
 {
     HidDevice *pDevice2 = reinterpret_cast<HidDevice *>(lp);
-    HID_DATA *pData = pDevice2->inputData();
+    HidData *pData = pDevice2->inputData();
     _lbOutput.addStr("-------------------------------------------");
     _lbCounter++;
 

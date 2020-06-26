@@ -9,7 +9,7 @@ void HidInfo::displayDeviceAttributes(
     lb.addStr("Version Number 0x%x", pAttrib->VersionNumber);
 }
 
-std::string HidInfo::report(HID_DATA *data)
+std::string HidInfo::report(HidData *data)
 {
     const int bufsize = 200;
     char buf[bufsize];

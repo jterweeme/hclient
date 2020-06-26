@@ -5,7 +5,27 @@ WriteDialog *WriteDialog::_instance;
 
 void WriteData::dump(std::ostream &os) const
 {
-    os << label << ": " << value << "\n";
+    os << _label << ": " << _value << "\n";
+}
+
+void WriteData::setLabel(const char *s)
+{
+    _label = std::string(s);
+}
+
+void WriteData::setValue(const char *s)
+{
+    _value = std::string(s);
+}
+
+std::string WriteData::getLabel() const
+{
+    return _label;
+}
+
+std::string WriteData::getValue() const
+{
+    return _value;
 }
 
 WriteDialog::WriteDialog(HINSTANCE hInst) : _hInst(hInst)
@@ -13,13 +33,11 @@ WriteDialog::WriteDialog(HINSTANCE hInst) : _hInst(hInst)
     _instance = this;
 }
 
-INT WriteDialog::create(HWND parent, rWriteDataStruct *data, int count)
+INT_PTR WriteDialog::create2(HWND parent, std::vector<WriteData> *data)
 {
-    INT_PTR ret;
-    _prData = data;
-    _prCount = count;
-    ret = DialogBoxParamA(_hInst, "WRITEDATA", parent, _dlgProc, 0);
-    return INT(ret);
+    _data = data;
+    _prCount = data->size();
+    return DialogBoxParamA(_hInst, "WRITEDATA", parent, _dlgProc, 0);
 }
 
 INT_PTR CALLBACK WriteDialog::_dlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp)
@@ -27,41 +45,39 @@ INT_PTR CALLBACK WriteDialog::_dlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp
     return _instance->_bGetDataDlgProc(hDlg, msg, wp, lp);
 }
 
-VOID WriteDialog::_readDataFromControls(INT iOffset, INT iCount)
+void WriteDialog::_readDataFromControls(INT iOffset, INT iCount)
 {
     INT iValueControlID = IDC_OUT_EDIT1;
-    rWriteDataStruct *pDataWalk = _prData + iOffset;
 
-    for (INT iLoop = 0; iLoop < iCount && iLoop < CONTROL_COUNT; iLoop++)
+    for (size_t iLoop = 0; iLoop < iCount && iLoop < CONTROL_COUNT; iLoop++)
     {
         HWND hValueWnd = GetDlgItem(_hDlg, iValueControlID);
-        GetWindowTextA(hValueWnd, pDataWalk->szValue, MAX_VALUE);
+        char buf[MAX_VALUE];
+        GetWindowTextA(hValueWnd, buf, MAX_VALUE);
+        _data->at(iLoop + iOffset).setValue(buf);
         iValueControlID++;
-        pDataWalk++;
     }
 }
 
-VOID WriteDialog::_writeDataToControls(INT iOffset, INT iCount)
+void WriteDialog::_writeDataToControls(INT iOffset, size_t iCount)
 {
-    INT iLoop;
     INT iLabelControlID = IDC_OUT_LABEL1;
     INT iValueControlID = IDC_OUT_EDIT1;
-    rWriteDataStruct *pDataWalk = _prData + iOffset;
 
+    size_t iLoop;
     for (iLoop = 0; iLoop < iCount && iLoop < CONTROL_COUNT; iLoop++)
     {
          HWND hLabelWnd = GetDlgItem(_hDlg, iLabelControlID);
          HWND hValueWnd = GetDlgItem(_hDlg, iValueControlID);
          ShowWindow(hLabelWnd, SW_SHOW);
          ShowWindow(hValueWnd, SW_SHOW);
-         SetWindowTextA(hLabelWnd, pDataWalk->szLabel);
-         SetWindowTextA(hValueWnd, pDataWalk->szValue);
+         SetWindowTextA(hLabelWnd, _data->at(iLoop + iOffset).getLabel().c_str());
+         SetWindowTextA(hValueWnd, _data->at(iLoop + iOffset).getValue().c_str());
          iLabelControlID++;
          iValueControlID++;
-         pDataWalk++;
     }
 
-    // Hide the controls
+    // Hide the unused controls
     for (; iLoop < CONTROL_COUNT; iLoop++)
     {
         HWND hLabelWnd = GetDlgItem(_hDlg, iLabelControlID);
@@ -76,25 +92,25 @@ VOID WriteDialog::_writeDataToControls(INT iOffset, INT iCount)
 INT_PTR WriteDialog::_initDialog(HWND hDlg)
 {
     _hDlg = hDlg;
-    hScrollBar = GetDlgItem(hDlg, IDC_SCROLLBAR);
+    _hScrollBar = GetDlgItem(hDlg, IDC_SCROLLBAR);
 
     if (_prCount > CONTROL_COUNT)
     {
-        iDisplayCount = CONTROL_COUNT;
-        iScrollRange = _prCount - CONTROL_COUNT;
+        _iDisplayCount = CONTROL_COUNT;
+        _iScrollRange = _prCount - CONTROL_COUNT;
         SCROLLINFO rScrollInfo;
         rScrollInfo.fMask = SIF_RANGE | SIF_POS;
         rScrollInfo.nPos = 0;
         rScrollInfo.nMin = 0;
-        rScrollInfo.nMax = iScrollRange;
+        rScrollInfo.nMax = _iScrollRange;
         rScrollInfo.cbSize = sizeof(rScrollInfo);
         rScrollInfo.nPage = CONTROL_COUNT;
-        SetScrollInfo(hScrollBar, SB_CTL, &rScrollInfo, TRUE);
+        SetScrollInfo(_hScrollBar, SB_CTL, &rScrollInfo, TRUE);
     }
     else
     {
-        iDisplayCount = _prCount;
-        EnableWindow(hScrollBar, FALSE);
+        _iDisplayCount = _prCount;
+        EnableWindow(_hScrollBar, FALSE);
     }
 
     _writeDataToControls(0, _prCount);
@@ -113,7 +129,7 @@ WriteDialog::_bGetDataDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM)
         {
         case IDOK:
         case ID_SEND:
-            _readDataFromControls(iCurrentScrollPos, iDisplayCount);
+            _readDataFromControls(_iCurrentScrollPos, _iDisplayCount);
             EndDialog(hDlg, 1);
             break;
         case IDCANCEL:
@@ -122,40 +138,36 @@ WriteDialog::_bGetDataDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM)
         }
         break;
     case WM_VSCROLL:
-        _readDataFromControls(iCurrentScrollPos, iDisplayCount);
+        _readDataFromControls(_iCurrentScrollPos, _iDisplayCount);
 
         switch (LOWORD(wParam))
         {
         case SB_LINEDOWN:
-            ++iCurrentScrollPos;
+            ++_iCurrentScrollPos;
             break;
         case SB_LINEUP:
-            --iCurrentScrollPos;
+            --_iCurrentScrollPos;
             break;
         case SB_THUMBPOSITION:
-            iCurrentScrollPos = HIWORD(wParam);
+            _iCurrentScrollPos = HIWORD(wParam);
             //fallthrough!
         case SB_PAGEUP:
-            iCurrentScrollPos -= CONTROL_COUNT;
+            _iCurrentScrollPos -= CONTROL_COUNT;
             break;
         case SB_PAGEDOWN:
-            iCurrentScrollPos += CONTROL_COUNT;
+            _iCurrentScrollPos += CONTROL_COUNT;
             break;
         }
 
-        if (iCurrentScrollPos < 0)
-            iCurrentScrollPos = 0;
-
-        if (iCurrentScrollPos > iScrollRange)
-            iCurrentScrollPos = iScrollRange;
-
-        SendMessageA(hScrollBar, SBM_SETPOS, iCurrentScrollPos, TRUE);
+        _iCurrentScrollPos = max(_iCurrentScrollPos, 0);
+        _iCurrentScrollPos = min(_iCurrentScrollPos, _iScrollRange);
+        SendMessageA(_hScrollBar, SBM_SETPOS, _iCurrentScrollPos, TRUE);
         INT iTemp = LOWORD(wParam);
 
         if (iTemp == SB_LINEDOWN || iTemp == SB_LINEUP ||
             iTemp == SB_THUMBPOSITION || iTemp == SB_PAGEUP || iTemp==SB_PAGEDOWN)
         {
-            _writeDataToControls(iCurrentScrollPos, iDisplayCount);
+            _writeDataToControls(_iCurrentScrollPos, _iDisplayCount);
         }
         break;
     } 

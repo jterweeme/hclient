@@ -66,12 +66,12 @@ USHORT HidItem::bufLen() const
 void HidItem::allocData()
 {
     _dataLen = _nButtonCaps + nValues();
-    _data = new HID_DATA[_dataLen];
+    _data = new HidData[_dataLen];
 }
 
 void HidItem::initData(PHIDP_PREPARSED_DATA ppd)
 {
-    HID_DATA *data = _data;
+    HidData *data = _data;
 
     for (ULONG i = 0; i < _nButtonCaps; i++, data++)
     {

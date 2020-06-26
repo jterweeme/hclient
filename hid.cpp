@@ -1,4 +1,5 @@
 #include "hid.h"
+#include "toolbox.h"
 #include <strsafe.h>
 
 HidDevice::HidDevice()
@@ -19,7 +20,7 @@ HANDLE HidDevice::handle() const
     return _handle;
 }
 
-HID_DATA *HidDevice::inputData() const
+HidData *HidDevice::inputData() const
 {
     return _input._data;
 }
@@ -34,17 +35,17 @@ const HIDP_CAPS *HidDevice::caps()
     return &_Caps;
 }
 
-HidItem const *HidDevice::input() const
+HidInput const *HidDevice::input() const
 {
     return &_input;
 }
 
-HidItem const *HidDevice::output() const
+HidOutput const *HidDevice::output() const
 {
     return &_output;
 }
 
-HidItem const *HidDevice::feature() const
+HidFeature const *HidDevice::feature() const
 {
     return &_feature;
 }
@@ -65,7 +66,7 @@ BOOLEAN HidDevice::read()
     if (bytesRead != _Caps.InputReportByteLength)
         return FALSE;
 
-    return _UnpackReport();
+    return _unpackReport();
 }
 
 BOOLEAN HidDevice::readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap)
@@ -83,79 +84,70 @@ BOOLEAN HidDevice::readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap)
     return TRUE;
 }
 
-BOOLEAN HidDevice::_packReport(HID_DATA *Data, ULONG DataLength)
+void HidDevice::_packReport(HidData *Data, ULONG DataLength)
 {
-    char *ReportBuffer = _output._buffer;
-    ULONG CurrReportID;
-    memset(ReportBuffer, UCHAR(0), _output.bufLen());
-    CurrReportID = Data->ReportID;
+    memset(_output._buffer, UCHAR(0), _output.bufLen());
+    ULONG CurrReportID = Data[0].ReportID;
 
-    for (ULONG i = 0; i < DataLength; i++, Data++)
+    for (ULONG i = 0; i < DataLength; i++)
     {
-        if (Data->ReportID != CurrReportID)
+        if (Data[i].ReportID != CurrReportID)
             continue;
 
-        if (Data->IsButtonData)
+        if (Data[i].IsButtonData)
         {
-            ULONG numUsages = Data->ButtonData.MaxUsageLength;
-            Data->Status = HidP_SetUsages(HidP_Output, Data->UsagePage, 0,
-                                Data->ButtonData.Usages, &numUsages, _ppd,
-                                ReportBuffer, _output.bufLen());
+            ULONG numUsages = Data[i].ButtonData.MaxUsageLength;
+            Data[i].Status = HidP_SetUsages(HidP_Output, Data[i].UsagePage, 0,
+                                Data[i].ButtonData.Usages, &numUsages, _ppd,
+                                _output._buffer, _output.bufLen());
         }
         else
         {
-            Data->Status = HidP_SetUsageValue(HidP_Output, Data->UsagePage, 0,
-                                 Data->ValueData.Usage, Data->ValueData.Value,
-                                 _ppd, ReportBuffer, _output.bufLen());
+            Data[i].Status = HidP_SetUsageValue(HidP_Output, Data[i].UsagePage, 0,
+                                 Data[i].ValueData.Usage, Data[i].ValueData.Value,
+                                 _ppd, _output._buffer, _output.bufLen());
         }
 
-        if (Data->Status != HIDP_STATUS_SUCCESS)
-            return FALSE;
+        if (Data[i].Status != HIDP_STATUS_SUCCESS)
+            throw "SetUsages!";
+
+        Data[i].IsDataSet = TRUE;
     }
+}
 
-    for (ULONG i = 0; i < DataLength; i++, Data++)
-        if (CurrReportID == Data->ReportID)
-            Data->IsDataSet = TRUE;
-
-    return TRUE;
+BOOL HidDevice::write(const char *buf, USHORT n, LPDWORD bytesWritten)
+{
+    return WriteFile(handle(), buf, n, bytesWritten, nullptr);
 }
 
 BOOLEAN HidDevice::write()
 {
-    HID_DATA *pData = _output._data;
+    for (ULONG i = 0; i < _output.dataLength(); i++)
+        _output._data[i].IsDataSet = FALSE;
+
+    HidData *pData = _output._data;
+    BOOLEAN Status = TRUE;
 
     for (ULONG i = 0; i < _output.dataLength(); i++, pData++)
-        pData->IsDataSet = FALSE;
-
-    BOOLEAN Status = TRUE;
-    pData = _output._data;
-
-    for (ULONG Index = 0; Index < _output.dataLength(); Index++, pData++)
     {
         if (pData->IsDataSet)
             continue;
 
         DWORD bytesWritten;
-        _packReport(pData, _output.dataLength() - Index);
-
-        BOOLEAN WriteStatus = WriteFile(handle(), _output._buffer,
-                      _Caps.OutputReportByteLength, &bytesWritten, NULL);
-
+        _packReport(pData, _output.dataLength() - i);
+        BOOLEAN WriteStatus = write(_output._buffer, _output.bufLen(), &bytesWritten);
         WriteStatus = WriteStatus && bytesWritten == _Caps.OutputReportByteLength;
         Status = Status && WriteStatus;
     }
     return Status;
 }
 
-BOOLEAN HidDevice::_UnpackReport()
+BOOLEAN HidDevice::_unpackReport()
 {
-    char *ReportBuffer = _input._buffer;
-    USHORT ReportBufferLength = _Caps.InputReportByteLength;
     HIDP_REPORT_TYPE ReportType = HidP_Input;
-    HID_DATA *Data = _input._data;
+    HidData *Data = _input._data;
     ULONG DataLength = _input.dataLength();
-    BOOLEAN result = FALSE;
-    UCHAR reportID = ReportBuffer[0];
+    UCHAR reportID = _input._buffer[0];
 
     for (ULONG i = 0; i < DataLength; i++, Data++)
     {
@@ -168,16 +160,16 @@ BOOLEAN HidDevice::_UnpackReport()
 
             Data->Status = HidP_GetUsages(ReportType, Data->UsagePage, 0,
                                 Data->ButtonData.Usages, &numUsages, _ppd,
-                                ReportBuffer, ReportBufferLength);
+                                _input._buffer, _input.bufLen());
 
             if (Data->Status != HIDP_STATUS_SUCCESS)
-                return result;
+                return FALSE;
 
             ULONG Index, nextUsage;
             for (Index = 0, nextUsage = 0; Index < numUsages; Index++)
             {
                 if (Data->ButtonData.UsageMin <= Data->ButtonData.Usages[Index] &&
-                        Data->ButtonData.Usages[Index] <= Data->ButtonData.UsageMax)
+                    Data->ButtonData.Usages[Index] <= Data->ButtonData.UsageMax)
                 {
                     Data->ButtonData.Usages[nextUsage++] = Data->ButtonData.Usages[Index];
                 }
@@ -190,28 +182,27 @@ BOOLEAN HidDevice::_UnpackReport()
         {
             Data->Status = HidP_GetUsageValue(ReportType, Data->UsagePage, 0,
                              Data->ValueData.Usage, &Data->ValueData.Value, _ppd,
-                             ReportBuffer, ReportBufferLength);
+                             _input._buffer, _input.bufLen());
 
             if (Data->Status != HIDP_STATUS_SUCCESS)
-                return result;
+                return FALSE;
 
             Data->Status = HidP_GetScaledUsageValue(ReportType, Data->UsagePage, 0,
                                   Data->ValueData.Usage, &Data->ValueData.ScaledValue,
-                                  _ppd, ReportBuffer, ReportBufferLength);
+                                  _ppd, _input._buffer, _input.bufLen());
 
             if (Data->Status != HIDP_STATUS_SUCCESS && Data->Status != HIDP_STATUS_NULL)
             {
-                return result;
+                return FALSE;
             }
         }
         Data->IsDataSet = TRUE;
     }
 
-    result = TRUE;
-    return result;
+    return TRUE;
 }
 
-BOOLEAN HidDevice::open(LPCSTR path, BOOL read, BOOL write,
+void HidDevice::open(LPCSTR path, BOOL read, BOOL write,
     BOOL isOverlapped, BOOL isExclusive)
 {
     DWORD accessFlags = 0;
@@ -220,7 +211,7 @@ BOOLEAN HidDevice::open(LPCSTR path, BOOL read, BOOL write,
     _handle = INVALID_HANDLE_VALUE;
 
     if (path == NULL)
-        return FALSE;
+        throw "No path!";
 
     _path = std::string(path);
 
@@ -267,8 +258,10 @@ BOOLEAN HidDevice::open(LPCSTR path, BOOL read, BOOL write,
 
 Done:
     if (!bRet)
+    {
         close();
+        throw "Error";
+    }
 
-    return bRet;
 }
 

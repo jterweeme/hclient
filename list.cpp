@@ -47,6 +47,7 @@ PLIST_ENTRY CList::removeHead()
     return ret;
 }
 
+#if 0
 void CList::destroyWithCallback(PLIST_CALLBACK *cb)
 {
     LIST_ENTRY *currNode;
@@ -57,6 +58,7 @@ void CList::destroyWithCallback(PLIST_CALLBACK *cb)
         cb(currNode);
     }
 }
+#endif
 
 void CList::remove(LIST_ENTRY *node)
 {

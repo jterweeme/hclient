@@ -10,7 +10,7 @@ class HidDevice;
 class HidInfo
 {
 public:
-    std::string report(HID_DATA *data);
+    std::string report(HidData *data);
     void displayDeviceCaps(const HIDP_CAPS *pCaps, Listbox &lb) const;
     void displayButtonAttributes(HIDP_BUTTON_CAPS *pButton, Listbox &lb) const;
     void displayValueAttributes(HIDP_VALUE_CAPS *pValue, Listbox &lb) const;

@@ -34,8 +34,8 @@ private:
     HidInput _input;
     HidOutput _output;
     HidFeature _feature;
-    BOOLEAN _packReport(HID_DATA *Data, ULONG DataLength);
-    BOOLEAN _UnpackReport();
+    void _packReport(HidData *Data, ULONG DataLength);
+    BOOLEAN _unpackReport();
 public:
     HidDevice();
     ~HidDevice();
@@ -43,15 +43,16 @@ public:
     HANDLE handle() const;
     HIDD_ATTRIBUTES const *attributes() const;
     HIDP_CAPS const *caps();
-    HidItem const *input() const;
-    HidItem const *output() const;
-    HidItem const *feature() const;
-    HID_DATA *inputData() const;
+    HidInput const *input() const;
+    HidOutput const *output() const;
+    HidFeature const *feature() const;
+    HidData *inputData() const;
     BOOLEAN read();
     BOOLEAN write();
+    BOOL write(const char *buf, USHORT n, LPDWORD bytesWritten);
     BOOLEAN readOverlapped(HANDLE completionEv, LPOVERLAPPED overlap);
     void close();
-    BOOLEAN open(LPCSTR path, BOOL read, BOOL write, BOOL overlapped, BOOL exclusive);
+    void open(LPCSTR path, BOOL read, BOOL write, BOOL overlapped, BOOL exclusive);
 };
 
 class HidButtonCaps

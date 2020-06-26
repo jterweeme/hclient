@@ -4,7 +4,7 @@
 #include <windows.h>
 #include <hidsdi.h>
 
-struct HID_DATA
+struct HidData
 {
     BOOLEAN IsButtonData;
     UCHAR Reserved;
@@ -24,7 +24,6 @@ struct HID_DATA
       struct {
          USAGE Usage; // The usage describing this value;
          USHORT Reserved;
-
          ULONG Value;
          LONG ScaledValue;
       } ValueData;
@@ -40,7 +39,7 @@ protected:
     USHORT _nValueCaps;
 public:
     CHAR *_buffer;
-    HID_DATA *_data;
+    HidData *_data;
 private:
     ULONG _dataLen;
     HIDP_BUTTON_CAPS *_buttonCaps;

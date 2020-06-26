@@ -7,7 +7,6 @@ class Button : public Element
 {
 public:
     Button();
-    BOOL disable();
     BOOL text(LPCSTR s);
 };
 
